@@ -1,0 +1,1 @@
+ALTER TABLE "sources" ADD COLUMN "app_url" text;

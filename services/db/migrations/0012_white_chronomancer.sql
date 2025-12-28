@@ -1,0 +1,1 @@
+ALTER TABLE "build_tasks" ADD COLUMN "config" jsonb DEFAULT '{}'::jsonb;
