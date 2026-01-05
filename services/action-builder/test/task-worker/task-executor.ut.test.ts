@@ -788,4 +788,246 @@ describe('TaskExecutor', () => {
     // Browser should still be closed
     expect(closeMock).toHaveBeenCalled();
   }, 60000); // Increase test timeout to 60 seconds
+
+  // ========================================================================
+  // UT-TE-20: Browser connection error - retry and succeed on 2nd attempt
+  // ========================================================================
+  it('UT-TE-20: Browser connection error - retry and succeed on 2nd attempt', async () => {
+    // Arrange
+    const { ActionBuilder } = await import('../../src/ActionBuilder');
+
+    let initializeCallCount = 0;
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+
+    // Use mockImplementation (not Once) so all instances use this mock
+    (ActionBuilder as any).mockImplementation(() => ({
+      initialize: vi.fn().mockImplementation(() => {
+        initializeCallCount++;
+        if (initializeCallCount === 1) {
+          // First attempt fails with ECONNREFUSED
+          throw new Error('connect ECONNREFUSED 127.0.0.1:51864');
+        }
+        // Second attempt succeeds
+        return Promise.resolve();
+      }),
+      build: vi.fn().mockResolvedValue({
+        success: true,
+        turns: 5,
+        totalDuration: 10000,
+        tokens: { input: 1000, output: 500, total: 1500 },
+        savedPath: './output/test.yaml',
+        siteCapability: {
+          domain: 'test.com',
+          pages: { home: { elements: { button: {} } } },
+          global_elements: {},
+        },
+      }),
+      savePartialResult: vi.fn().mockResolvedValue(null),
+      close: closeMock,
+    }));
+
+    const executor2 = new TaskExecutor(mockDb, mockConfig);
+    const mockTask = createMockTask();
+
+    selectChain.limit.mockResolvedValue([mockChunkData()]);
+
+    vi.useFakeTimers();
+
+    // Act
+    const executePromise = executor2.execute(mockTask);
+
+    // Fast-forward through retry delay (2 seconds for first retry)
+    await vi.advanceTimersByTimeAsync(3000);
+
+    const result = await executePromise;
+
+    vi.useRealTimers();
+
+    // Assert: Task succeeded on 2nd attempt
+    expect(result.success).toBe(true);
+    expect(result.actions_created).toBe(1); // 1 element in home page
+    expect(initializeCallCount).toBe(2); // Called twice: 1st failed, 2nd succeeded
+
+    // Task should be marked as completed
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'completed',
+        progress: 100,
+      })
+    );
+
+    // Browser should be closed
+    expect(closeMock).toHaveBeenCalled();
+  });
+
+  // ========================================================================
+  // UT-TE-21: Browser connection error - retry 3 times and fail
+  // ========================================================================
+  it('UT-TE-21: Browser connection error - retry 3 times and fail', async () => {
+    // Arrange
+    const { ActionBuilder } = await import('../../src/ActionBuilder');
+
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+
+    // Use mockImplementation (not Once) so all instances use this mock
+    (ActionBuilder as any).mockImplementation(() => ({
+      initialize: vi.fn().mockRejectedValue(
+        new Error('connect ECONNREFUSED 127.0.0.1:51864')
+      ),
+      build: vi.fn(),
+      savePartialResult: vi.fn().mockResolvedValue(null),
+      close: closeMock,
+    }));
+
+    const executor2 = new TaskExecutor(mockDb, mockConfig);
+    const mockTask = createMockTask();
+
+    selectChain.limit.mockResolvedValue([mockChunkData()]);
+
+    vi.useFakeTimers();
+
+    // Act
+    const executePromise = executor2.execute(mockTask);
+
+    // Fast-forward through all retry delays
+    // Attempt 1: immediate, Attempt 2: +2s, Attempt 3: +4s = total 6s
+    await vi.advanceTimersByTimeAsync(7000);
+
+    const result = await executePromise;
+
+    vi.useRealTimers();
+
+    // Assert: Task failed after 3 attempts
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ECONNREFUSED');
+
+    // Task should be marked as failed
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        errorMessage: expect.stringContaining('ECONNREFUSED'),
+      })
+    );
+
+    // Browser should be closed
+    expect(closeMock).toHaveBeenCalled();
+  });
+
+  // ========================================================================
+  // UT-TE-22: Non-retryable error - fail immediately without retry
+  // ========================================================================
+  it('UT-TE-22: Non-retryable error - fail immediately without retry', async () => {
+    // Arrange
+    const { ActionBuilder } = await import('../../src/ActionBuilder');
+
+    let initializeCallCount = 0;
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+
+    // Use mockImplementation (not Once) so all instances use this mock
+    (ActionBuilder as any).mockImplementation(() => ({
+      initialize: vi.fn().mockImplementation(() => {
+        initializeCallCount++;
+        // Non-retryable error (configuration error)
+        throw new Error('Invalid API key provided');
+      }),
+      build: vi.fn(),
+      savePartialResult: vi.fn().mockResolvedValue(null),
+      close: closeMock,
+    }));
+
+    const executor2 = new TaskExecutor(mockDb, mockConfig);
+    const mockTask = createMockTask();
+
+    selectChain.limit.mockResolvedValue([mockChunkData()]);
+
+    // Act
+    const result = await executor2.execute(mockTask);
+
+    // Assert: Task failed immediately without retry
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid API key');
+    expect(initializeCallCount).toBe(1); // Only called once, no retry
+
+    // Task should be marked as failed
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        errorMessage: expect.stringContaining('Invalid API key'),
+      })
+    );
+
+    // Browser should be closed
+    expect(closeMock).toHaveBeenCalled();
+  });
+
+  // ========================================================================
+  // UT-TE-23: Target closed error - retry and succeed on 3rd attempt
+  // ========================================================================
+  it('UT-TE-23: Target closed error - retry and succeed on 3rd attempt', async () => {
+    // Arrange
+    const { ActionBuilder } = await import('../../src/ActionBuilder');
+
+    let buildCallCount = 0;
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+
+    // Use mockImplementation (not Once) so all instances use this mock
+    (ActionBuilder as any).mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      build: vi.fn().mockImplementation(() => {
+        buildCallCount++;
+        if (buildCallCount <= 2) {
+          // First 2 attempts fail with "Target closed"
+          throw new Error('Protocol error (Target.sendMessageToTarget): Target closed.');
+        }
+        // Third attempt succeeds
+        return Promise.resolve({
+          success: true,
+          turns: 5,
+          totalDuration: 10000,
+          tokens: { input: 1000, output: 500, total: 1500 },
+          savedPath: './output/test.yaml',
+          siteCapability: {
+            domain: 'test.com',
+            pages: { home: { elements: { button: {} } } },
+            global_elements: {},
+          },
+        });
+      }),
+      savePartialResult: vi.fn().mockResolvedValue(null),
+      close: closeMock,
+    }));
+
+    const executor2 = new TaskExecutor(mockDb, mockConfig);
+    const mockTask = createMockTask();
+
+    selectChain.limit.mockResolvedValue([mockChunkData()]);
+
+    vi.useFakeTimers();
+
+    // Act
+    const executePromise = executor2.execute(mockTask);
+
+    // Fast-forward through retry delays (2s + 4s = 6s)
+    await vi.advanceTimersByTimeAsync(7000);
+
+    const result = await executePromise;
+
+    vi.useRealTimers();
+
+    // Assert: Task succeeded on 3rd attempt
+    expect(result.success).toBe(true);
+    expect(result.actions_created).toBe(1);
+    expect(buildCallCount).toBe(3); // Called 3 times
+
+    // Task should be marked as completed
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'completed',
+        progress: 100,
+      })
+    );
+
+    // Browser should be closed
+    expect(closeMock).toHaveBeenCalled();
+  });
 });

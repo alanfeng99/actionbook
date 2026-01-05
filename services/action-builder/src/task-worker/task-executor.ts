@@ -71,15 +71,35 @@ export class TaskExecutor {
   }
 
   /**
-   * Execute recording task
+   * Check if an error is retryable (browser/connection errors)
+   */
+  private isRetryableError(error: Error | string): boolean {
+    const errorMsg = typeof error === 'string' ? error : error.message
+    const retryablePatterns = [
+      'ECONNREFUSED',        // Connection refused
+      'Target closed',       // Browser target closed
+      'Browser closed',      // Browser instance closed
+      'Connection closed',   // CDP connection closed
+      'Protocol error',      // CDP protocol error
+      'Session closed',      // Browser session closed
+      'ECONNRESET',          // Connection reset
+      'socket hang up',      // Socket disconnected
+    ]
+
+    return retryablePatterns.some(pattern => errorMsg.includes(pattern))
+  }
+
+  /**
+   * Execute recording task with automatic retry for browser/connection errors
    *
    * @param task - Recording task to execute
    * @returns Execution result
    */
   async execute(task: RecordingTask): Promise<ExecutionResult> {
-    const startTime = Date.now()
+    const maxRetries = 3
+    const baseRetryDelay = 2000 // 2 seconds base delay
 
-    // Validate chunkId
+    // Validate chunkId (non-retryable error)
     if (task.chunkId === null || task.chunkId === undefined) {
       await this.updateTaskStatus(task.id, {
         status: 'failed',
@@ -90,11 +110,11 @@ export class TaskExecutor {
         success: false,
         actions_created: 0,
         error: 'Chunk ID is required',
-        duration_ms: Date.now() - startTime,
+        duration_ms: 0,
       }
     }
 
-    // Fetch ChunkData
+    // Fetch ChunkData (non-retryable error)
     let chunkData: ExtendedChunkData
     try {
       chunkData = await this.fetchChunkData(task.chunkId)
@@ -110,9 +130,86 @@ export class TaskExecutor {
         success: false,
         actions_created: 0,
         error: errorMessage,
-        duration_ms: Date.now() - startTime,
+        duration_ms: 0,
       }
     }
+
+    // Retry loop for browser/connection errors
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(
+          `[TaskExecutor] Executing task #${task.id} (attempt ${attempt}/${maxRetries})`
+        )
+
+        // Execute the task
+        const result = await this.executeInternal(task, chunkData)
+
+        // Success - return result
+        if (attempt > 1) {
+          console.log(
+            `[TaskExecutor] Task ${task.id} succeeded on attempt ${attempt}/${maxRetries}`
+          )
+        }
+        return result
+
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        const isRetryable = this.isRetryableError(error as Error)
+
+        if (isRetryable && attempt < maxRetries) {
+          // Retryable error and not last attempt - retry with exponential backoff
+          const retryDelay = baseRetryDelay * attempt
+          console.warn(
+            `[TaskExecutor] Task ${task.id} failed with retryable error on attempt ${attempt}/${maxRetries}: ${errorMessage}`
+          )
+          console.log(
+            `[TaskExecutor] Retrying in ${retryDelay}ms...`
+          )
+
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          continue // Retry
+        }
+
+        // Non-retryable error or last attempt failed
+        // Mark task as failed and return error result
+        if (isRetryable) {
+          console.error(
+            `[TaskExecutor] Task ${task.id} failed after ${maxRetries} attempts with retryable error: ${errorMessage}`
+          )
+        } else {
+          console.error(
+            `[TaskExecutor] Task ${task.id} failed with non-retryable error: ${errorMessage}`
+          )
+        }
+
+        // Update task status to failed
+        await this.updateTaskStatus(task.id, {
+          status: 'failed',
+          errorMessage,
+          attemptCount: task.attemptCount + 1,
+        })
+
+        return {
+          success: false,
+          actions_created: 0,
+          error: errorMessage,
+          duration_ms: 0,
+        }
+      }
+    }
+
+    // Should never reach here, but TypeScript needs a return
+    throw new Error('Unexpected: retry loop completed without result')
+  }
+
+  /**
+   * Internal execution logic (called by execute with retry wrapper)
+   */
+  private async executeInternal(
+    task: RecordingTask,
+    chunkData: ExtendedChunkData
+  ): Promise<ExecutionResult> {
+    const startTime = Date.now()
 
     // Log task context information
     console.log(
@@ -252,6 +349,7 @@ export class TaskExecutor {
       }
 
       // Check if this is a timeout error - attempt to save partial results
+      // Timeout is NOT retryable, handle it specially
       if (errorMessage.includes('timeout')) {
         console.log(
           `[TaskExecutor] Timeout detected for task ${task.id}, attempting to save partial results...`
@@ -312,20 +410,9 @@ export class TaskExecutor {
         }
       }
 
-      // No partial results or save failed - mark as failed
-      await this.updateTaskStatus(task.id, {
-        status: 'failed',
-        errorMessage,
-        attemptCount: task.attemptCount + 1,
-      })
-
-      const duration = Date.now() - startTime
-      return {
-        success: false,
-        actions_created: 0,
-        error: errorMessage,
-        duration_ms: duration,
-      }
+      // Re-throw error to be handled by retry logic in execute()
+      // Don't update task status here - let the retry handler decide
+      throw error
     } finally {
       // Ensure browser is closed
       await builder.close()
