@@ -32,6 +32,8 @@ import type {
 export interface WorkerPoolConfig extends TaskExecutorConfig {
   /** Number of concurrent workers (default: 3) */
   concurrency?: number
+  /** Task execution timeout in minutes (default: 10) */
+  taskTimeoutMinutes?: number
 }
 
 /**
@@ -88,9 +90,11 @@ export class WorkerPool {
   private concurrency: number
   private taskScheduler: TaskScheduler
   private stopHeartbeats: Map<number, () => void> = new Map()
+  private taskTimeoutMs: number
 
   constructor(db: Database, config: WorkerPoolConfig) {
     this.concurrency = config.concurrency ?? 3
+    this.taskTimeoutMs = (config.taskTimeoutMinutes ?? 10) * 60 * 1000
     this.taskScheduler = new TaskScheduler(db)
 
     // Pre-create worker slots with executors
@@ -286,13 +290,61 @@ export class WorkerPool {
 
   /**
    * Execute a single task with a specific worker
+   *
+   * Includes timeout protection to prevent tasks from hanging indefinitely.
+   * If a task exceeds the timeout, it will be marked as failed and the worker
+   * will be released.
    */
   private async executeTaskWithWorker(
     worker: WorkerState,
     task: RecordingTask
   ): Promise<ExecutionResult> {
     console.log(`[WorkerPool] Worker ${worker.id} executing task ${task.id}`)
-    return worker.executor.execute(task)
+
+    // Maximum execution time (configurable, default: 10 minutes)
+    // This prevents tasks from hanging indefinitely due to unhandled Promise deadlocks
+    const timeoutPromise = new Promise<ExecutionResult>((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Task execution timeout after ${this.taskTimeoutMs / 1000 / 60} minutes`
+          )
+        )
+      }, this.taskTimeoutMs)
+    })
+
+    try {
+      return await Promise.race([
+        worker.executor.execute(task),
+        timeoutPromise,
+      ])
+    } catch (error) {
+      // If timeout or other error occurs, ensure task is marked as failed
+      const errorMessage = error instanceof Error ? error.message : String(error)
+
+      console.error(
+        `[WorkerPool] Worker ${worker.id} task ${task.id} failed:`,
+        errorMessage
+      )
+
+      // Update task status to failed (best-effort - TaskExecutor may have already updated)
+      try {
+        await this.taskScheduler.markFailed(task.id, errorMessage)
+      } catch (updateError) {
+        console.warn(
+          `[WorkerPool] Failed to update task ${task.id} status:`,
+          updateError
+        )
+      }
+
+      // Return failure result
+      return {
+        success: false,
+        actions_created: 0,
+        error: errorMessage,
+        duration_ms: this.taskTimeoutMs,
+      }
+    }
   }
 
   /**

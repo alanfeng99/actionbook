@@ -94,6 +94,8 @@ export interface TaskExecutorConfig {
   profileEnabled?: boolean; // Default false
   /** Profile directory path */
   profileDir?: string;      // Default '.browser-profile'
+  /** builder.build() timeout in minutes (default: 8) */
+  buildTimeoutMinutes?: number;
 }
 
 /**
@@ -196,6 +198,7 @@ export interface BuildTaskWorkerConfig extends TaskExecutorConfig {
   staleTimeoutMinutes?: number; // Default: 30 (tasks running > 30min are considered stale)
   heartbeatIntervalMs?: number; // Default: 30000ms (30 seconds) - interval for heartbeat updates
   concurrency?: number;        // Default: 1 (sequential), set > 1 for concurrent execution
+  taskTimeoutMinutes?: number; // Default: 10 (max task execution time)
 }
 
 /**
