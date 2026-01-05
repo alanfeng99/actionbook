@@ -319,6 +319,39 @@ export class ActionBuilder {
   }
 
   /**
+   * Save partial result when timeout occurs
+   * Delegates to recorder to save discovered elements
+   *
+   * @returns Object with element count and siteCapability, or null if nothing to save
+   */
+  async savePartialResult(): Promise<{ elements: number; siteCapability: any } | null> {
+    if (!this.recorder) {
+      this.log('warn', '[ActionBuilder] No recorder available for partial save')
+      return null
+    }
+
+    try {
+      this.log('info', '[ActionBuilder] Attempting to save partial result...')
+      const result = await this.recorder.savePartialResult()
+
+      if (result && result.elements > 0) {
+        this.log(
+          'info',
+          `[ActionBuilder] Successfully saved ${result.elements} elements as partial result`
+        )
+      } else {
+        this.log('warn', '[ActionBuilder] No elements to save in partial result')
+      }
+
+      return result
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error)
+      this.log('error', `[ActionBuilder] Failed to save partial result: ${errMsg}`)
+      return null
+    }
+  }
+
+  /**
    * Close browser and cleanup resources
    */
   async close(): Promise<void> {

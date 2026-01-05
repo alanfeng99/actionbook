@@ -51,6 +51,7 @@ export class ActionRecorder {
   // DB task tracking
   private currentTaskId: number | null = null;
   private stepOrder: number = 0;
+  private taskStatusUpdated: boolean = false; // Prevent race condition between timeout and normal completion
 
   // Termination tracking
   private taskStartTime: number = 0;
@@ -703,7 +704,8 @@ export class ActionRecorder {
     }
 
     // Update task status in database
-    if (this.dbWriter && this.currentTaskId) {
+    // Skip if already updated by timeout handler (prevent race condition)
+    if (this.dbWriter && this.currentTaskId && !this.taskStatusUpdated) {
       try {
         const status = hasElements ? 'completed' : 'failed';
         const statusMessage = options.message || `Task ${reason}. Discovered ${this.discoveredElements.size} elements.`;
@@ -714,6 +716,7 @@ export class ActionRecorder {
           combinedTotalTokens,
           status === 'failed' ? statusMessage : undefined
         );
+        this.taskStatusUpdated = true;
       } catch (err) {
         log("error", `[ActionRecorder] Failed to update task status: ${err}`);
       }
@@ -755,6 +758,90 @@ export class ActionRecorder {
   }
 
   /**
+   * Save partial result when timeout occurs
+   * Optimizes and saves discovered elements even if recording is incomplete
+   *
+   * @returns Object with element count and siteCapability, or null if nothing to save
+   */
+  async savePartialResult(): Promise<{ elements: number; siteCapability: any } | null> {
+    const hasElements = this.discoveredElements.size > 0;
+
+    if (!hasElements || !this.siteCapability) {
+      log("warn", "[ActionRecorder] No elements to save in partial result");
+      return null;
+    }
+
+    try {
+      log("info", `[ActionRecorder] Saving partial result with ${this.discoveredElements.size} elements...`);
+
+      // Optimize selectors using LLM before saving
+      if (this.config.enableSelectorOptimization !== false) {
+        try {
+          log("info", `[ActionRecorder] Optimizing selectors for ${this.discoveredElements.size} elements...`);
+          const optimizer = new SelectorOptimizer();
+          const optimizationResult = await optimizer.optimizeSelectors(this.discoveredElements);
+
+          if (optimizationResult.success) {
+            log("info", `[ActionRecorder] Selector optimization complete: ${optimizationResult.optimizedCount}/${optimizationResult.totalElements} elements optimized`);
+
+            // Update siteCapability with optimized selectors
+            for (const optElement of optimizationResult.elements) {
+              const element = this.discoveredElements.get(optElement.elementId);
+              if (element) {
+                element.selectors = optElement.optimizedSelectors;
+
+                // Update in siteCapability pages
+                for (const page of Object.values(this.siteCapability.pages)) {
+                  if (page.elements[optElement.elementId]) {
+                    page.elements[optElement.elementId].selectors = optElement.optimizedSelectors;
+                  }
+                }
+                // Update in global_elements
+                if (this.siteCapability.global_elements[optElement.elementId]) {
+                  this.siteCapability.global_elements[optElement.elementId].selectors = optElement.optimizedSelectors;
+                }
+              }
+            }
+          } else {
+            log("warn", `[ActionRecorder] Selector optimization failed: ${optimizationResult.error}`);
+          }
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          log("warn", `[ActionRecorder] Selector optimization error: ${errMsg}`);
+        }
+      }
+
+      // Save to YAML
+      const savedPath = this.yamlWriter.save(this.siteCapability);
+      log("info", `[ActionRecorder] Saved ${this.discoveredElements.size} elements to YAML: ${savedPath}`);
+
+      // Save to database (dual-write)
+      if (this.dbWriter) {
+        try {
+          const sourceId = await this.dbWriter.save(this.siteCapability);
+          log("info", `[ActionRecorder] Saved partial result to database, sourceId: ${sourceId}`);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          log("error", `[ActionRecorder] Failed to save partial result to database: ${errMsg}`);
+          // Don't throw - YAML save succeeded
+        }
+      }
+
+      // Mark task status as updated to prevent race condition with finalizeResult()
+      this.taskStatusUpdated = true;
+
+      return {
+        elements: this.discoveredElements.size,
+        siteCapability: this.siteCapability,
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      log("error", `[ActionRecorder] savePartialResult failed: ${errMsg}`);
+      return null;
+    }
+  }
+
+  /**
    * Record capabilities from a scenario
    */
   async record(
@@ -781,6 +868,7 @@ export class ActionRecorder {
     this.siteCapability = null;
     this.currentTaskId = null;
     this.stepOrder = 0;
+    this.taskStatusUpdated = false; // Reset race condition flag
 
     // Reset termination tracking
     this.observeCallCount = 0;

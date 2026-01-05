@@ -62,10 +62,11 @@ export class TaskExecutor {
       headless: config.headless ?? true,
       maxTurns: config.maxTurns ?? 30,
       outputDir: config.outputDir ?? './output',
-      buildTimeoutMinutes: config.buildTimeoutMinutes ?? 8,
+      taskTimeoutMinutes: config.taskTimeoutMinutes ?? 10,
       ...config,
     }
-    this.buildTimeoutMs = (this.config.buildTimeoutMinutes ?? 8) * 60 * 1000
+    // Use taskTimeoutMinutes for overall timeout (including init, build, cleanup)
+    this.buildTimeoutMs = (this.config.taskTimeoutMinutes ?? 10) * 60 * 1000
     this.dbWriter = new DbWriter(db)
   }
 
@@ -136,44 +137,49 @@ export class TaskExecutor {
       profileDir: this.config.profileDir,
     })
 
-    try {
-      // Initialize browser
-      await builder.initialize()
-
-      // Build Prompt
-      const chunkType = (task.config?.chunk_type as ChunkType) || 'exploratory'
-      const { systemPrompt, userPrompt } = this.buildCustomPrompts(
-        chunkData,
-        chunkType
-      )
-
-      // Generate scenario name
-      const scenarioName = `task_${task.id}_${Date.now()}`
-
-      // Use root domain of source.base_url as start URL
-      // e.g., https://notion.com/help → https://notion.com
-      const startUrl = new URL(chunkData.source_base_url).origin
-
-      // Call ActionBuilder.build() with timeout protection
-      // Uses configurable timeout (default: 8 minutes)
-      const buildPromise = builder.build(startUrl, scenarioName, {
-        siteName: chunkData.source_name,
-        customSystemPrompt: systemPrompt,
-        customUserPrompt: userPrompt,
-        taskId: task.id, // Pass existing task ID to avoid duplicate task creation
-      })
-
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(
-            new Error(
-              `ActionBuilder.build() timeout after ${this.buildTimeoutMs / 1000 / 60} minutes`
-            )
+    // Set up overall task timeout
+    const taskTimeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Task execution timeout after ${this.buildTimeoutMs / 1000 / 60} minutes`
           )
-        }, this.buildTimeoutMs)
-      })
+        )
+      }, this.buildTimeoutMs)
+    })
 
-      const buildResult = await Promise.race([buildPromise, timeoutPromise])
+    try {
+      // Wrap entire task execution with timeout protection
+      const executionPromise = (async () => {
+        // Initialize browser
+        await builder.initialize()
+
+        // Build Prompt
+        const chunkType = (task.config?.chunk_type as ChunkType) || 'exploratory'
+        const { systemPrompt, userPrompt } = this.buildCustomPrompts(
+          chunkData,
+          chunkType
+        )
+
+        // Generate scenario name
+        const scenarioName = `task_${task.id}_${Date.now()}`
+
+        // Use root domain of source.base_url as start URL
+        // e.g., https://notion.com/help → https://notion.com
+        const startUrl = new URL(chunkData.source_base_url).origin
+
+        // Call ActionBuilder.build()
+        const buildResult = await builder.build(startUrl, scenarioName, {
+          siteName: chunkData.source_name,
+          customSystemPrompt: systemPrompt,
+          customUserPrompt: userPrompt,
+          taskId: task.id, // Pass existing task ID to avoid duplicate task creation
+        })
+
+        return buildResult
+      })()
+
+      const buildResult = await Promise.race([executionPromise, taskTimeoutPromise])
 
       if (buildResult.success) {
         // Success: count elements
@@ -245,6 +251,68 @@ export class TaskExecutor {
         console.error(`[TaskExecutor] Stack trace:\n${errorStack}`)
       }
 
+      // Check if this is a timeout error - attempt to save partial results
+      if (errorMessage.includes('timeout')) {
+        console.log(
+          `[TaskExecutor] Timeout detected for task ${task.id}, attempting to save partial results...`
+        )
+
+        try {
+          const partialResult = await builder.savePartialResult()
+
+          if (partialResult && partialResult.elements > 0) {
+            // Partial save succeeded - mark as completed with timeout note
+            console.log(
+              `[TaskExecutor] Successfully saved ${partialResult.elements} elements for task ${task.id} despite timeout`
+            )
+
+            // Update chunks.elements field with discovered elements
+            if (task.chunkId && partialResult.siteCapability) {
+              try {
+                await this.dbWriter.updateChunkElements(
+                  task.chunkId,
+                  partialResult.siteCapability
+                )
+                console.log(
+                  `[TaskExecutor] Updated chunk ${task.chunkId} with ${partialResult.elements} elements`
+                )
+              } catch (chunkUpdateError) {
+                console.warn(
+                  `[TaskExecutor] Failed to update chunk elements for chunk ${task.chunkId}:`,
+                  chunkUpdateError
+                )
+              }
+            }
+
+            await this.updateTaskStatus(task.id, {
+              status: 'completed',
+              progress: 100,
+              errorMessage: `Timeout after ${this.buildTimeoutMs / 1000 / 60}min, saved ${partialResult.elements} elements`,
+              completedAt: new Date(),
+              attemptCount: task.attemptCount + 1,
+            })
+
+            const duration = Date.now() - startTime
+            return {
+              success: true,
+              actions_created: partialResult.elements,
+              error: `timeout_partial_save: ${errorMessage}`,
+              duration_ms: duration,
+            }
+          } else {
+            console.warn(
+              `[TaskExecutor] No elements to save for task ${task.id} after timeout`
+            )
+          }
+        } catch (saveError) {
+          console.error(
+            `[TaskExecutor] Failed to save partial result for task ${task.id}:`,
+            saveError
+          )
+        }
+      }
+
+      // No partial results or save failed - mark as failed
       await this.updateTaskStatus(task.id, {
         status: 'failed',
         errorMessage,
