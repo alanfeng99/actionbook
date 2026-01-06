@@ -310,6 +310,7 @@ export class SelectorValidator {
 
   /**
    * Validate a single SelectorItem
+   * Checks: exists (valid), visible, and interactable
    */
   private async validateSingleSelector(
     page: Page,
@@ -322,6 +323,8 @@ export class SelectorValidator {
         type: selector.type,
         value: selector.value,
         valid: false,
+        visible: false,
+        interactable: false,
         error: resolved.error,
         isTemplate: selector.isTemplate,
       };
@@ -332,11 +335,90 @@ export class SelectorValidator {
     try {
       const locator = this.buildLocator(page, selector.type, selectorValue);
       const count = await locator.count();
+
+      if (count === 0) {
+        return {
+          type: selector.type,
+          value: selectorValue,
+          valid: false,
+          visible: false,
+          interactable: false,
+          error: 'Element not found',
+          isTemplate: selector.isTemplate,
+        };
+      }
+
+      // Element exists, check visibility and interactability
+      // TODO: Enhance interactable detection in the future. like event bubble
+      let visible = false;
+      let interactable = false;
+
+      try {
+        visible = await locator.isVisible({ timeout: 1000 });
+      } catch {
+        // isVisible failed, element might be detached
+        visible = false;
+      }
+
+      if (visible) {
+        try {
+          // Check if element is enabled (not disabled)
+          const isEnabled = await locator.isEnabled({ timeout: 1000 });
+          // Check if element has a bounding box (not zero-sized or off-screen)
+          const boundingBox = await locator.boundingBox();
+
+          if (isEnabled && boundingBox !== null) {
+            // Additional checks via getComputedStyle
+            const styleCheck = await locator.evaluate((el) => {
+              const style = window.getComputedStyle(el);
+              return {
+                pointerEvents: style.pointerEvents,
+                opacity: style.opacity,
+              };
+            });
+
+            // Check pointer-events and opacity
+            const hasPointerEvents = styleCheck.pointerEvents !== 'none';
+            const hasOpacity = parseFloat(styleCheck.opacity) > 0;
+
+            // Check if element is obstructed by another element
+            let notObstructed = true;
+            const centerX = boundingBox.x + boundingBox.width / 2;
+            const centerY = boundingBox.y + boundingBox.height / 2;
+
+            const elementAtPoint = await page.evaluate(
+              ([x, y]) => {
+                const el = document.elementFromPoint(x, y);
+                return el ? true : false;
+              },
+              [centerX, centerY]
+            );
+
+            // If elementFromPoint returns something, check if it's our element or a child
+            if (elementAtPoint) {
+              notObstructed = await locator.evaluate((el, point) => {
+                const topEl = document.elementFromPoint(point.x, point.y);
+                // Element is not obstructed if topEl is the element itself or a descendant
+                return topEl === el || el.contains(topEl);
+              }, { x: centerX, y: centerY });
+            }
+
+            interactable = hasPointerEvents && hasOpacity && notObstructed;
+          } else {
+            interactable = false;
+          }
+        } catch {
+          // Check failed
+          interactable = false;
+        }
+      }
+
       return {
         type: selector.type,
         value: selectorValue,
-        valid: count > 0,
-        error: count === 0 ? 'Element not found' : undefined,
+        valid: true,
+        visible,
+        interactable,
         isTemplate: selector.isTemplate,
       };
     } catch (error) {
@@ -344,6 +426,8 @@ export class SelectorValidator {
         type: selector.type,
         value: selectorValue,
         valid: false,
+        visible: false,
+        interactable: false,
         error: error instanceof Error ? error.message : String(error),
         isTemplate: selector.isTemplate,
       };

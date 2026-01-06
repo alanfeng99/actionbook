@@ -305,6 +305,10 @@ export interface SelectorValidationDetail {
   valid: boolean;
   error?: string;
   isTemplate?: boolean;
+  /** Whether the element is visible on the page */
+  visible?: boolean;
+  /** Whether the element is interactable (enabled and not obstructed) */
+  interactable?: boolean;
 }
 
 /**
