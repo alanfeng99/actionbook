@@ -73,15 +73,11 @@ export class BuildTaskWorker {
   private staleTimeoutMinutes: number
   private maxAttempts: number
   private heartbeatIntervalMs: number
-  private taskTimeoutMinutes: number
-  private buildTimeoutMinutes: number
 
   constructor(db: Database, config: BuildTaskWorkerConfig) {
     this.staleTimeoutMinutes = config.staleTimeoutMinutes ?? 10
     this.maxAttempts = config.maxAttempts ?? 3
     this.recordingTaskLimit = config.recordingTaskLimit ?? 100
-    this.taskTimeoutMinutes = config.taskTimeoutMinutes ?? 10
-    this.buildTimeoutMinutes = config.buildTimeoutMinutes ?? 8
 
     // Heartbeat interval should be less than stale timeout
     // Clamp to at most half of stale timeout to ensure at least 2 heartbeats before stale detection
@@ -106,18 +102,17 @@ export class BuildTaskWorker {
     this.taskGenerator = new TaskGenerator(db)
 
     const concurrency = config.concurrency ?? 1
+    const taskTimeoutMinutes = config.taskTimeoutMinutes ?? 10
     this.workerPool = new WorkerPool(db, {
       ...config,
       concurrency,
-      taskTimeoutMinutes: this.taskTimeoutMinutes,
-      buildTimeoutMinutes: this.buildTimeoutMinutes,
     })
 
     console.log(
       `[BuildTaskWorker] Initialized with concurrency=${concurrency}, ` +
         `staleTimeout=${this.staleTimeoutMinutes}min, maxAttempts=${this.maxAttempts}, ` +
         `heartbeat=${this.heartbeatIntervalMs}ms, ` +
-        `taskTimeout=${this.taskTimeoutMinutes}min, buildTimeout=${this.buildTimeoutMinutes}min`
+        `taskTimeout=${taskTimeoutMinutes}min`
     )
   }
 

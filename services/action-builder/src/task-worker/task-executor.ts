@@ -62,10 +62,11 @@ export class TaskExecutor {
       headless: config.headless ?? true,
       maxTurns: config.maxTurns ?? 30,
       outputDir: config.outputDir ?? './output',
-      buildTimeoutMinutes: config.buildTimeoutMinutes ?? 8,
+      taskTimeoutMinutes: config.taskTimeoutMinutes ?? 10,
       ...config,
     }
-    this.buildTimeoutMs = (this.config.buildTimeoutMinutes ?? 8) * 60 * 1000
+    // Use taskTimeoutMinutes for overall timeout (including init, build, cleanup)
+    this.buildTimeoutMs = (this.config.taskTimeoutMinutes ?? 10) * 60 * 1000
     this.dbWriter = new DbWriter(db)
   }
 
@@ -76,44 +77,42 @@ export class TaskExecutor {
    * @returns Execution result
    */
   async execute(task: RecordingTask): Promise<ExecutionResult> {
-    const startTime = Date.now()
+    const startTime = Date.now();
 
-    // Validate chunkId
+    // 1. Validate inputs
     if (task.chunkId === null || task.chunkId === undefined) {
       await this.updateTaskStatus(task.id, {
         status: 'failed',
         errorMessage: 'Chunk ID is required',
         attemptCount: task.attemptCount + 1,
-      })
+      });
       return {
         success: false,
         actions_created: 0,
         error: 'Chunk ID is required',
-        duration_ms: Date.now() - startTime,
-      }
+        duration_ms: 0,
+      };
     }
 
-    // Fetch ChunkData
-    let chunkData: ExtendedChunkData
+    // 2. Fetch chunk data
+    let chunkData: ExtendedChunkData;
     try {
-      chunkData = await this.fetchChunkData(task.chunkId)
+      chunkData = await this.fetchChunkData(task.chunkId);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
+      const errorMessage = error instanceof Error ? error.message : String(error);
       await this.updateTaskStatus(task.id, {
         status: 'failed',
         errorMessage,
         attemptCount: task.attemptCount + 1,
-      })
+      });
       return {
         success: false,
         actions_created: 0,
         error: errorMessage,
-        duration_ms: Date.now() - startTime,
-      }
+        duration_ms: 0,
+      };
     }
 
-    // Log task context information
     console.log(
       `[TaskExecutor] Executing task #${task.id}: ` +
         `source_id=${chunkData.source_id}, ` +
@@ -121,9 +120,9 @@ export class TaskExecutor {
         `chunk_id=${chunkData.id}, ` +
         `name="${chunkData.source_name}", ` +
         `url="${chunkData.document_url}"`
-    )
+    );
 
-    // Create ActionBuilder instance
+    // 3. Create ActionBuilder (pass timeout config)
     const builder = new ActionBuilder({
       llmApiKey: this.config.llmApiKey,
       llmBaseURL: this.config.llmBaseURL,
@@ -134,133 +133,107 @@ export class TaskExecutor {
       outputDir: this.config.outputDir,
       profileEnabled: this.config.profileEnabled,
       profileDir: this.config.profileDir,
-    })
+      buildTimeoutMs: this.buildTimeoutMs, // Pass timeout to builder
+    });
 
     try {
-      // Initialize browser
-      await builder.initialize()
+      // 4. Build prompts
+      const chunkType = (task.config?.chunk_type as ChunkType) || 'exploratory';
+      const { systemPrompt, userPrompt } = this.buildCustomPrompts(chunkData, chunkType);
+      const scenarioName = `task_${task.id}_${Date.now()}`;
+      const startUrl = new URL(chunkData.source_base_url).origin;
 
-      // Build Prompt
-      const chunkType = (task.config?.chunk_type as ChunkType) || 'exploratory'
-      const { systemPrompt, userPrompt } = this.buildCustomPrompts(
-        chunkData,
-        chunkType
-      )
-
-      // Generate scenario name
-      const scenarioName = `task_${task.id}_${Date.now()}`
-
-      // Use root domain of source.base_url as start URL
-      // e.g., https://notion.com/help → https://notion.com
-      const startUrl = new URL(chunkData.source_base_url).origin
-
-      // Call ActionBuilder.build() with timeout protection
-      // Uses configurable timeout (default: 8 minutes)
-      const buildPromise = builder.build(startUrl, scenarioName, {
+      // 5. Call ActionBuilder.build() - it handles retry/timeout internally
+      const buildResult = await builder.build(startUrl, scenarioName, {
         siteName: chunkData.source_name,
         customSystemPrompt: systemPrompt,
         customUserPrompt: userPrompt,
-        taskId: task.id, // Pass existing task ID to avoid duplicate task creation
-      })
+        taskId: task.id,
+      });
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          reject(
-            new Error(
-              `ActionBuilder.build() timeout after ${this.buildTimeoutMs / 1000 / 60} minutes`
-            )
-          )
-        }, this.buildTimeoutMs)
-      })
-
-      const buildResult = await Promise.race([buildPromise, timeoutPromise])
-
+      // 6. Process result
       if (buildResult.success) {
-        // Success: count elements
-        const actionsCreated = this.countElements(buildResult.siteCapability)
+        const actionsCreated = this.countElements(buildResult.siteCapability);
 
-        // Update chunks.elements field with discovered elements
+        // Update chunk elements
         if (task.chunkId && buildResult.siteCapability && actionsCreated > 0) {
           try {
             await this.dbWriter.updateChunkElements(
               task.chunkId,
               buildResult.siteCapability
-            )
+            );
           } catch (chunkUpdateError) {
-            // Log but don't fail the task if chunk update fails
             console.warn(
               `[TaskExecutor] Failed to update chunk elements for chunk ${task.chunkId}:`,
               chunkUpdateError
-            )
+            );
           }
         }
 
-        // Update task status to completed
-        await this.updateTaskStatus(task.id, {
+        // Update task status
+        // If partialResult (timeout with partial save), record timeout info
+        const statusUpdate: any = {
           status: 'completed',
           progress: 100,
           completedAt: new Date(),
           attemptCount: task.attemptCount + 1,
-        })
+        };
 
-        const duration = Date.now() - startTime
+        if (buildResult.partialResult) {
+          // Keep the original ActionBuilder message for downstream observability
+          statusUpdate.errorMessage = buildResult.message;
+        }
+
+        await this.updateTaskStatus(task.id, statusUpdate);
+
+        const duration = Date.now() - startTime;
         return {
           success: true,
           actions_created: actionsCreated,
+          error: buildResult.partialResult ? buildResult.message : undefined,
           duration_ms: duration,
-          turns: buildResult.turns,
-          tokens_used: buildResult.tokens.total,
+          turns: buildResult.turns || 0,
+          tokens_used: buildResult.tokens?.total || 0,
           saved_path: buildResult.savedPath,
-        }
+        };
       } else {
-        // ActionBuilder returned failure
-        const errorMessage = `Recording failed: ${buildResult.message}`
+        // Build failed
+        const errorMessage = `Recording failed: ${buildResult.message}`;
         await this.updateTaskStatus(task.id, {
           status: 'failed',
           errorMessage,
           attemptCount: task.attemptCount + 1,
-        })
+        });
 
-        const duration = Date.now() - startTime
+        const duration = Date.now() - startTime;
         return {
           success: false,
           actions_created: 0,
           error: errorMessage,
           duration_ms: duration,
-          turns: buildResult.turns,
-          tokens_used: buildResult.tokens.total,
-        }
+          turns: buildResult.turns || 0,
+          tokens_used: buildResult.tokens?.total || 0,
+        };
       }
     } catch (error) {
-      // Execution exception - print full stack trace for debugging
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      const errorStack = error instanceof Error ? error.stack : undefined
-
-      console.error(
-        `[TaskExecutor] Task ${task.id} failed with error:`,
-        errorMessage
-      )
-      if (errorStack) {
-        console.error(`[TaskExecutor] Stack trace:\n${errorStack}`)
-      }
+      // All errors from ActionBuilder.build() are final
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       await this.updateTaskStatus(task.id, {
         status: 'failed',
         errorMessage,
         attemptCount: task.attemptCount + 1,
-      })
+      });
 
-      const duration = Date.now() - startTime
+      const duration = Date.now() - startTime;
       return {
         success: false,
         actions_created: 0,
         error: errorMessage,
         duration_ms: duration,
-      }
+      };
     } finally {
-      // Ensure browser is closed
-      await builder.close()
+      await builder.close();
     }
   }
 

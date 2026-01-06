@@ -12,8 +12,7 @@
  * Environment Variables:
  *   ACTION_BUILDER_PROFILE_ENABLED=false # Disable browser profile (enabled by default)
  *   ACTION_BUILDER_PROFILE_DIR=.browser-profile  # Profile directory path
- *   ACTION_BUILDER_TASK_TIMEOUT_MINUTES=10  # Overall task execution timeout (default: 10)
- *   ACTION_BUILDER_BUILD_TIMEOUT_MINUTES=8  # builder.build() timeout (default: 8)
+ *   ACTION_BUILDER_TASK_TIMEOUT_MINUTES=10  # Task execution timeout (default: 10)
  *   ACTION_BUILDER_STALE_TIMEOUT_MINUTES=30 # Stale task detection timeout (default: 30)
  */
 
@@ -151,9 +150,6 @@ async function main() {
     ),
     taskTimeoutMinutes: parseInt(
       process.env.ACTION_BUILDER_TASK_TIMEOUT_MINUTES || '10'
-    ),
-    buildTimeoutMinutes: parseInt(
-      process.env.ACTION_BUILDER_BUILD_TIMEOUT_MINUTES || '8'
     ),
     concurrency: parseInt(process.env.ACTION_BUILDER_TASK_CONCURRENCY || '3'),
     profileEnabled,
