@@ -362,7 +362,10 @@ export class ActionBuilder {
       options.customSystemPrompt || CAPABILITY_RECORDER_SYSTEM_PROMPT
     const userMessage =
       options.customUserPrompt ||
-      generateUserPrompt(scenario, url, { focusAreas: options.focusAreas })
+      generateUserPrompt(scenario, url, {
+        scenarioDescription: options.scenarioDescription,
+        focusAreas: options.focusAreas,
+      })
 
     if (options.customSystemPrompt || options.customUserPrompt) {
       this.log(

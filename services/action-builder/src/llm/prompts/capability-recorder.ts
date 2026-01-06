@@ -124,11 +124,19 @@ Use snake_case with module prefix:
 
 /**
  * Generate a user prompt for a specific scenario
+ *
+ * @param scenario - Scenario name/ID (e.g., "task_8228_xxx" or "Airbnb homepage")
+ * @param url - Target URL to record
+ * @param options.scenarioDescription - Detailed scenario description (chunk_content)
+ * @param options.focusAreas - Specific areas to focus on
+ * @param options.autoScroll - Whether to auto-scroll (default: true)
+ * @param options.pageType - Page type override
  */
 export function generateUserPrompt(
   scenario: string,
   url: string,
   options?: {
+    scenarioDescription?: string;
     focusAreas?: string[];
     autoScroll?: boolean;
     pageType?: string;
@@ -143,11 +151,14 @@ export function generateUserPrompt(
     ? `\n\n## Focus Areas\n${options.focusAreas.map((area) => `- ${area}`).join("\n")}`
     : "";
 
+  // Use scenarioDescription if provided, otherwise use scenario name
+  const scenarioText = options?.scenarioDescription || scenario;
+
   return `## Record all UI elements for this scenario
 
 **Target Page:** ${url}
 
-**Scenario:** ${scenario}
+**Scenario:** ${scenarioText}
 
 **Instructions:**
 
