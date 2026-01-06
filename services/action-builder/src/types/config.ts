@@ -202,6 +202,8 @@ export interface ValidatorConfig {
 export interface BuildOptions {
   siteName?: string;
   siteDescription?: string;
+  /** Detailed scenario description (e.g., chunk_content from knowledge base) */
+  scenarioDescription?: string;
   focusAreas?: string[];
   pageTypes?: string[];
   /** Custom system prompt (overrides default CAPABILITY_RECORDER_SYSTEM_PROMPT) */

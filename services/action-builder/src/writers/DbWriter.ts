@@ -247,7 +247,7 @@ export class DbWriter {
     const legacySelector: DbSelectorItem =
       selectors[0] ||
       ({ type: 'css', value: '', priority: 0, confidence: 0 } as DbSelectorItem)
-    const allowMethods = element.allow_methods as DbAllowMethod[]
+    const allowMethods = (element.allow_methods || []) as DbAllowMethod[]
     const args = element.arguments as DbArgumentDef[] | undefined
     const discoveredAt = element.discovered_at
       ? new Date(element.discovered_at)
