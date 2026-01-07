@@ -15,11 +15,10 @@ import 'dotenv/config';
 import { StagehandBrowser } from './browser/index.js';
 import { AIClient, createEmbeddingProvider, type EmbeddingProvider } from './brain/index.js';
 import { Storage, createStorage } from './storage/index.js';
-import { log, fileLogger } from './utils/index.js';
+import { log, fileLogger, normalizeUrl, isSameDomain, buildChunkContent } from './utils/index.js';
 import type {
   PlaybookBuilderConfig,
   PlaybookBuildResult,
-  PageCapabilities,
   DiscoveredPage,
 } from './types/index.js';
 
@@ -136,7 +135,7 @@ export class PlaybookBuilder {
           log('info', `[PlaybookBuilder] Discovered ${capabilities.capabilities.length} capabilities`);
 
           // Build chunk content and generate embedding
-          const chunkContent = this.buildChunkContent(analyzedPage.name, capabilities);
+          const chunkContent = buildChunkContent(analyzedPage.name, capabilities);
           let embedding: number[] | undefined;
           if (this.embedding) {
             try {
@@ -199,7 +198,7 @@ export class PlaybookBuilder {
     ];
 
     // Add startUrl as first page
-    const startUrlNormalized = this.normalizeUrl(this.config.startUrl);
+    const startUrlNormalized = normalizeUrl(this.config.startUrl);
     visitedUrls.add(startUrlNormalized);
 
     // Create a page entry for startUrl
@@ -233,7 +232,7 @@ export class PlaybookBuilder {
 
         // Add new pages to queue and results
         for (const page of discoveredPages) {
-          const normalizedUrl = this.normalizeUrl(page.url);
+          const normalizedUrl = normalizeUrl(page.url);
 
           // Skip if already visited or external
           if (visitedUrls.has(normalizedUrl)) {
@@ -241,7 +240,7 @@ export class PlaybookBuilder {
           }
 
           // Skip external URLs
-          if (!this.isSameDomain(page.url, this.config.startUrl)) {
+          if (!isSameDomain(page.url, this.config.startUrl)) {
             continue;
           }
 
@@ -272,95 +271,5 @@ export class PlaybookBuilder {
     }
 
     return allPages;
-  }
-
-  /**
-   * Normalize URL for comparison (remove trailing slash, fragment, etc.)
-   */
-  private normalizeUrl(url: string): string {
-    try {
-      const parsed = new URL(url);
-      // Remove fragment and trailing slash
-      let normalized = `${parsed.origin}${parsed.pathname}${parsed.search}`;
-      if (normalized.endsWith('/') && normalized.length > 1) {
-        normalized = normalized.slice(0, -1);
-      }
-      return normalized.toLowerCase();
-    } catch {
-      return url.toLowerCase();
-    }
-  }
-
-  /**
-   * Check if URL is same domain as base URL
-   */
-  private isSameDomain(url: string, baseUrl: string): boolean {
-    try {
-      const urlHost = new URL(url).hostname;
-      const baseHost = new URL(baseUrl).hostname;
-      return urlHost === baseHost;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Build chunk content from page capabilities
-   * This content is stored in chunks.content and used for embedding/search
-   * Focuses on capabilities and scenarios - element details are action-builder's job
-   */
-  private buildChunkContent(pageName: string, capabilities: PageCapabilities): string {
-    const parts: string[] = [
-      `# ${pageName}`,
-      '',
-      capabilities.description,
-    ];
-
-    // Capabilities as action phrases
-    if (capabilities.capabilities.length > 0) {
-      parts.push('');
-      parts.push('## Capabilities');
-      capabilities.capabilities.forEach((cap) => {
-        parts.push(`- ${cap}`);
-      });
-    }
-
-    // Functional areas
-    if (capabilities.functionalAreas && capabilities.functionalAreas.length > 0) {
-      parts.push('');
-      parts.push('## Functional Areas');
-      capabilities.functionalAreas.forEach((area) => {
-        parts.push(`- ${area}`);
-      });
-    }
-
-    // User scenarios/workflows
-    if (capabilities.scenarios && capabilities.scenarios.length > 0) {
-      parts.push('');
-      parts.push('## Scenarios');
-      capabilities.scenarios.forEach((scenario) => {
-        parts.push('');
-        parts.push(`### ${scenario.name}`);
-        parts.push(`**Goal:** ${scenario.goal}`);
-        parts.push('');
-        parts.push('**Steps:**');
-        scenario.steps.forEach((step, idx) => {
-          parts.push(`${idx + 1}. ${step}`);
-        });
-        parts.push('');
-        parts.push(`**Outcome:** ${scenario.outcome}`);
-      });
-    }
-
-    // Prerequisites
-    if (capabilities.prerequisites && capabilities.prerequisites.length > 0) {
-      parts.push('');
-      parts.push('## Prerequisites');
-      capabilities.prerequisites.forEach((prereq) => {
-        parts.push(`- ${prereq}`);
-      });
-    }
-
-    return parts.join('\n');
   }
 }
