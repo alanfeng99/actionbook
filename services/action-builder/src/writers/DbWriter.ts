@@ -233,6 +233,14 @@ export class DbWriter {
       return -1
     }
 
+    // Skip elements with empty selectors (phantom elements)
+    if (!element.selectors || element.selectors.length === 0) {
+      console.warn(
+        `[DbWriter] Skipping element with empty selectors: id=${element.id}`
+      )
+      return -1
+    }
+
     const columnInfo = await this.getElementsColumnInfo()
     const existingElement = await this.db
       .select()

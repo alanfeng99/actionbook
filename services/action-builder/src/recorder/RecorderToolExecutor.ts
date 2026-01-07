@@ -433,6 +433,18 @@ export class RecorderToolExecutor {
           });
         }
 
+        // Skip elements with no valid selectors (phantom elements)
+        // These are elements the LLM thinks exist but can't be found on the current page
+        if (multiSelectors.length === 0) {
+          log("warn", `[RecorderToolExecutor] Skipping element ${toolArgs.element_id} - no valid selectors found (element may not exist on current page)`);
+          output = {
+            error: "no_selectors_found",
+            message: `Could not find element "${toolArgs.element_id}" on current page. The element may exist on a different page. Skip this element and continue with others.`,
+            element_id: toolArgs.element_id,
+          };
+          break;
+        }
+
         const elementCapability: ElementCapability = {
           id: toolArgs.element_id as string,
           selectors: multiSelectors,
