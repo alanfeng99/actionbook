@@ -19,7 +19,7 @@ async function main() {
   // Read configuration (reuse existing environment variable names, time units use suffixes)
   const config = {
     maxConcurrentBuildTasks: parseInt(
-      process.env.ACTION_BUILDER_MAX_CONCURRENT_BUILD_TASKS ?? '5'
+      process.env.ACTION_BUILDER_BUILD_TASK_CONCURRENCY ?? '5'
     ),
     buildTaskPollIntervalSeconds: parseInt(
       process.env.ACTION_BUILDER_BUILD_TASK_POLL_INTERVAL_SECONDS ?? '5'
@@ -28,7 +28,7 @@ async function main() {
       process.env.ACTION_BUILDER_BUILD_TASK_STALE_TIMEOUT_MINUTES ?? '15'
     ),
     queueWorker: {
-      concurrency: parseInt(process.env.ACTION_BUILDER_TASK_CONCURRENCY ?? '3'),
+      concurrency: parseInt(process.env.ACTION_BUILDER_RECORDING_TASK_CONCURRENCY ?? '3'),
       staleTimeoutMinutes: parseInt(
         process.env.ACTION_BUILDER_STALE_TIMEOUT_MINUTES ?? '15'
       ),

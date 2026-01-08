@@ -217,10 +217,10 @@ Environment variables (all optional with sensible defaults):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACTION_BUILDER_MAX_CONCURRENT_BUILD_TASKS` | `5` | Max concurrent build_tasks |
+| `ACTION_BUILDER_BUILD_TASK_CONCURRENCY` | `5` | Max concurrent build_tasks (different sources) |
 | `ACTION_BUILDER_BUILD_TASK_POLL_INTERVAL_SECONDS` | `5` | Build task polling interval |
 | `ACTION_BUILDER_BUILD_TASK_STALE_TIMEOUT_MINUTES` | `15` | Stale build_task timeout (for crash recovery) |
-| `ACTION_BUILDER_TASK_CONCURRENCY` | `3` | Recording task concurrency (global) |
+| `ACTION_BUILDER_RECORDING_TASK_CONCURRENCY` | `3` | Max concurrent recording_tasks (browser instances) |
 | `ACTION_BUILDER_CHECK_INTERVAL_SECONDS` | `5` | Status check interval |
 | `ACTION_BUILDER_MAX_ATTEMPTS` | `3` | Max retry attempts for failed tasks |
 | `ACTION_BUILDER_STALE_TIMEOUT_MINUTES` | `15` | Stale recording_task timeout |
