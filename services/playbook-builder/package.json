@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsup",
     "dev": "npx tsx scripts/worker.ts",
-    "test": "vitest",
+    "test": "vitest run test/**/*.ut.test.ts",
+    "test:unit": "vitest run test/**/*.ut.test.ts",
+    "test:e2e": "npx tsx test/integration/scripts/simple-site-build.ts",
     "login": "npx tsx scripts/login.ts"
   },
   "dependencies": {
