@@ -221,7 +221,7 @@ export class BuildTaskRunner {
    */
   private async pollUntilComplete(): Promise<void> {
     while (this.running) {
-      // 1. 从 DB 查询所有 recording_tasks 状态
+      // 1. Query all recording_tasks status from DB
       const status = await this.getRecordingTasksStatus();
 
       console.log(
@@ -230,7 +230,10 @@ export class BuildTaskRunner {
           `completed=${status.completed}, failed=${status.failed}`
       );
 
-      // 2. 检查是否全部完成 (pending=0 且 running=0)
+      // 2. Check and retry failed tasks first (before checking completion)
+      await this.retryFailedTasks();
+
+      // 3. Check if all finished (pending=0 and running=0)
       const allFinished = status.pending === 0 && status.running === 0;
 
       if (allFinished) {
@@ -240,10 +243,7 @@ export class BuildTaskRunner {
         return;
       }
 
-      // 3. 检查失败任务并重试
-      await this.retryFailedTasks();
-
-      // 4. 等待后继续轮询
+      // 4. Wait before next poll
       await this.sleep(this.config.checkIntervalSeconds * 1000);
     }
   }

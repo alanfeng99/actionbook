@@ -140,13 +140,16 @@ export function createMockTaskExecutor(
 /**
  * 创建测试用 source
  */
-export async function createTestSource(db: Database): Promise<number> {
+export async function createTestSource(db: Database, name?: string): Promise<number> {
+  const timestamp = Date.now();
+  const sourceName = name || `test_source_${timestamp}`;
+
   const result = await db
     .insert(sources)
     .values({
-      name: `test_source_${Date.now()}`,
-      domain: `test-${Date.now()}.example.com`,
-      baseUrl: `https://test-${Date.now()}.example.com`,
+      name: sourceName,
+      domain: `test-${timestamp}.example.com`,
+      baseUrl: `https://test-${timestamp}.example.com`,
       description: 'Test source',
       healthScore: 100,
       tags: [],
