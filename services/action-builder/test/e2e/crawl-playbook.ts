@@ -417,6 +417,15 @@ Generate the merged Markdown document strictly following these 7 sections:
 - Use pattern format, e.g., https://example.com/docs/{version}/
 - List params variable descriptions
 - List 1-3 specific page examples
+\${url_pattern}
+- Query parameters: one per line, brief description
+    - \${name}: \${description}
+- Params: if URL contains dynamic parameters
+    - \${name}: \${description}
+- Pages: one per line, just url
+    - \${url1}
+    - \${url2}
+    - \${url3}
 
 ### 1. Page Overview
 Clearly define the core business objective of this page type in one sentence.
