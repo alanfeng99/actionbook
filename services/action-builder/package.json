@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "concurrently \"tsc --watch\" \"tsx scripts/build-task-worker.ts\"",
+    "dev": "concurrently \"tsc --watch\" \"tsx scripts/coordinator.ts\"",
+    "dev:old": "concurrently \"tsc --watch\" \"tsx scripts/build-task-worker.ts\"",
     "dev:build": "tsc --watch",
     "clean": "rm -rf dist",
     "lint": "eslint src cli --ext .ts",
