@@ -139,10 +139,11 @@ export function createMockTaskExecutor(
 
 /**
  * 创建测试用 source
+ * Always adds timestamp suffix to ensure uniqueness across test runs
  */
 export async function createTestSource(db: Database, name?: string): Promise<number> {
   const timestamp = Date.now();
-  const sourceName = name || `test_source_${timestamp}`;
+  const sourceName = name ? `${name}_${timestamp}` : `test_source_${timestamp}`;
 
   const result = await db
     .insert(sources)
