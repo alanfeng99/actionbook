@@ -297,4 +297,194 @@ describe('RecordingTaskQueueWorker', () => {
     await worker.stop(1000);
     await workerPromise;
   });
+
+  test('任务领取-跨 build_task: 3 个不同 build_task 的任务都能被消费', async () => {
+    // 创建 3 个不同的 build_task
+    const buildTask1 = await createTestBuildTask(db, testSourceId);
+    const buildTask2 = await createTestBuildTask(db, testSourceId);
+    const buildTask3 = await createTestBuildTask(db, testSourceId);
+    createdBuildTaskIds.push(buildTask1, buildTask2, buildTask3);
+
+    // 每个 build_task 创建 1 个 pending 任务
+    await createTestRecordingTasks(db, buildTask1, 1, {
+      sourceId: testSourceId,
+      chunkIds: [testChunkIds[0]],
+      status: 'pending',
+    });
+    await createTestRecordingTasks(db, buildTask2, 1, {
+      sourceId: testSourceId,
+      chunkIds: [testChunkIds[1]],
+      status: 'pending',
+    });
+    await createTestRecordingTasks(db, buildTask3, 1, {
+      sourceId: testSourceId,
+      chunkIds: [testChunkIds[2]],
+      status: 'pending',
+    });
+
+    // Mock TaskExecutor 快速完成
+    vi.mock('../src/task-worker/task-executor', () => ({
+      TaskExecutor: class MockTaskExecutor {
+        async execute() {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return {
+            success: true,
+            actions_created: 5,
+            duration_ms: 50,
+          };
+        }
+      },
+    }));
+
+    // 创建 Worker
+    const worker = new RecordingTaskQueueWorker(db, {
+      concurrency: 3,
+      idleWaitMs: 100,
+      databaseUrl: process.env.DATABASE_URL!,
+      headless: true,
+      outputDir: './test-output',
+    });
+
+    // 启动 Worker
+    const workerPromise = worker.start();
+
+    // 等待所有任务完成
+    await waitForCondition(
+      async () => {
+        const tasks = await db.select().from(recordingTasks);
+        return tasks.every((t) => t.status === 'completed' || t.status === 'failed');
+      },
+      5000,
+      100
+    );
+
+    // 检查所有任务都被消费
+    const tasks = await db.select().from(recordingTasks);
+    expect(tasks.length).toBe(3);
+
+    // 验证每个 build_task 的任务都被处理
+    const task1 = tasks.find((t) => t.buildTaskId === buildTask1);
+    const task2 = tasks.find((t) => t.buildTaskId === buildTask2);
+    const task3 = tasks.find((t) => t.buildTaskId === buildTask3);
+
+    expect(task1).toBeDefined();
+    expect(task2).toBeDefined();
+    expect(task3).toBeDefined();
+
+    // 停止 Worker
+    await worker.stop(1000);
+    await workerPromise;
+  }, 10000);
+
+  test('Stale 恢复-达到上限: running, lastHeartbeat 超时, attemptCount=3 应标记为 failed', async () => {
+    // 创建 1 个任务
+    const taskIds = await createTestRecordingTasks(db, testBuildTaskId, 1, {
+      sourceId: testSourceId,
+      chunkIds: [testChunkIds[0]],
+      status: 'running',
+      attemptCount: 3, // 已达到最大重试次数
+    });
+
+    // 设置为 stale (lastHeartbeat 超过 15 分钟)
+    const staleTime = new Date(Date.now() - 16 * 60 * 1000); // 16 分钟前
+    await db
+      .update(recordingTasks)
+      .set({
+        lastHeartbeat: staleTime,
+      })
+      .where(eq(recordingTasks.id, taskIds[0]));
+
+    // 创建 Worker
+    const worker = new RecordingTaskQueueWorker(db, {
+      concurrency: 1,
+      staleTimeoutMinutes: 15,
+      maxAttempts: 3,
+      databaseUrl: process.env.DATABASE_URL!,
+      headless: true,
+      outputDir: './test-output',
+    });
+
+    // 手动调用 recoverStaleTasks
+    await (worker as any).recoverStaleTasks();
+
+    // 检查数据库
+    const tasks = await db.select().from(recordingTasks);
+    const task = tasks.find((t) => t.id === taskIds[0]);
+
+    // 任务应该被标记为 failed（不再重试）
+    expect(task?.status).toBe('failed');
+    expect(task?.attemptCount).toBe(3);
+  });
+
+  test('优雅停止: 等待执行中任务完成后退出', async () => {
+    // 创建一个新的 build_task 用于此测试
+    const localBuildTaskId = await createTestBuildTask(db, testSourceId);
+    createdBuildTaskIds.push(localBuildTaskId);
+
+    // 创建 2 个 pending 任务
+    const taskIds = await createTestRecordingTasks(db, localBuildTaskId, 2, {
+      sourceId: testSourceId,
+      chunkIds: testChunkIds.slice(0, 2),
+      status: 'pending',
+    });
+
+    // Mock TaskExecutor 延迟执行
+    vi.mock('../src/task-worker/task-executor', () => ({
+      TaskExecutor: class MockTaskExecutor {
+        async execute() {
+          // 执行 1.5 秒
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          return {
+            success: true,
+            actions_created: 5,
+            duration_ms: 1500,
+          };
+        }
+      },
+    }));
+
+    // 创建 Worker
+    const worker = new RecordingTaskQueueWorker(db, {
+      concurrency: 2,
+      idleWaitMs: 100,
+      databaseUrl: process.env.DATABASE_URL!,
+      headless: true,
+      outputDir: './test-output',
+    });
+
+    // 启动 Worker
+    const workerPromise = worker.start();
+
+    // 等待任务被领取
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // 检查有任务在运行
+    let runningTasks = await db
+      .select()
+      .from(recordingTasks)
+      .where(eq(recordingTasks.status, 'running'));
+    const initialRunningCount = runningTasks.length;
+    expect(initialRunningCount).toBeGreaterThan(0);
+
+    // 记录停止开始时间
+    const stopStartTime = Date.now();
+
+    // 调用 stop()，给足够的时间等待任务完成
+    await worker.stop(3000);
+    await workerPromise;
+
+    const stopDuration = Date.now() - stopStartTime;
+
+    // 停止应该等待任务完成（大约 1.5 秒），而不是立即返回
+    // 如果立即强制停止，duration 会 < 500ms
+    // 如果等待任务完成，duration 应该 >= 1000ms（接近任务执行时间）
+    expect(stopDuration).toBeGreaterThanOrEqual(1000);
+
+    // Worker 应该已停止
+    expect((worker as any).running).toBe(false);
+
+    // 验证没有任务仍在处理中（Worker 内部的 runningTasks Map 应为空）
+    const workerRunningTasks = (worker as any).runningTasks;
+    expect(workerRunningTasks.size).toBe(0);
+  }, 10000);
 });
