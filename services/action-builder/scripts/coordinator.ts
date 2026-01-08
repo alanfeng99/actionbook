@@ -2,8 +2,8 @@
 /**
  * Coordinator Entry Script
  *
- * 启动 Task Queue Architecture 的协调器
- * 管理 build_task 并发执行和 recording_task 全局队列
+ * Start Task Queue Architecture coordinator
+ * Manage build_task concurrent execution and recording_task global queue
  */
 
 import { getDb } from '@actionbookdev/db';
@@ -16,7 +16,7 @@ async function main() {
 
   const db = getDb();
 
-  // 读取配置（复用现有环境变量名，时间单位使用后缀）
+  // Read configuration (reuse existing environment variable names, time units use suffixes)
   const config = {
     maxConcurrentBuildTasks: parseInt(
       process.env.ACTION_BUILDER_MAX_CONCURRENT_BUILD_TASKS ?? '5'
@@ -60,17 +60,17 @@ async function main() {
 
   const coordinator = new Coordinator(db, config);
 
-  // 处理优雅关闭
+  // Handle graceful shutdown
   const gracefulShutdown = async (signal: string) => {
     console.log(`\n[${signal}] Received, shutting down gracefully...`);
-    await coordinator.stop(60000); // 60 秒超时
+    await coordinator.stop(60000); // 60 seconds timeout
     process.exit(0);
   };
 
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-  // 启动
+  // Start
   await coordinator.start();
 }
 

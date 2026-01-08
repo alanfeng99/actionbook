@@ -1,17 +1,17 @@
 /**
- * BuildTaskRunner - 构建任务运行器
+ * BuildTaskRunner - Build Task Runner
  *
- * 职责:
- * - 处理单个 build_task 的生命周期
- * - 生成 recording_tasks 并写入 DB
- * - 轮询检查 recording_tasks 状态（从 DB 读取）
- * - 处理重试逻辑
- * - 所有完成后更新 build_task 状态
+ * Responsibilities:
+ * - Handle lifecycle of a single build_task
+ * - Generate recording_tasks and write to DB
+ * - Poll recording_tasks status (read from DB)
+ * - Handle retry logic
+ * - Update build_task status after all complete
  *
- * 特性:
- * - 非阻塞: 不等待 recording_task 执行，只生成和轮询
- * - 无状态: 每次从 DB 读取状态，不在内存保留
- * - 可并发: 多个 Runner 可同时运行，处理不同 build_task
+ * Features:
+ * - Non-blocking: Does not wait for recording_task execution, only generates and polls
+ * - Stateless: Reads state from DB each time, does not retain in memory
+ * - Concurrent: Multiple Runners can run simultaneously, handling different build_tasks
  */
 
 import type { Database } from '@actionbookdev/db';
@@ -21,11 +21,11 @@ import type { BuildTaskInfo } from './types/index.js';
 import type { SourceVersionStatus } from '@actionbookdev/db';
 
 export interface BuildTaskRunnerConfig {
-  /** 状态检查间隔（秒）*/
+  /** Status check interval (seconds) */
   checkIntervalSeconds?: number;
-  /** 最大重试次数 */
+  /** Max retry attempts */
   maxAttempts?: number;
-  /** 心跳间隔（毫秒）*/
+  /** Heartbeat interval (milliseconds) */
   heartbeatIntervalMs?: number;
 }
 
@@ -54,19 +54,19 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 运行 build_task 完整生命周期
+   * Run complete build_task lifecycle
    */
   async run(): Promise<void> {
     this.running = true;
 
     try {
-      // 1. 获取 build_task 详情
+      // 1. Get build_task details
       const buildTask = await this.getBuildTask();
       if (!buildTask) {
         throw new Error(`Build task ${this.buildTaskId} not found`);
       }
 
-      // 2. 生成 recording_tasks
+      // 2. Generate recording_tasks
       console.log(
         `[BuildTaskRunner #${this.buildTaskId}] Generating recording tasks...`
       );
@@ -75,7 +75,7 @@ export class BuildTaskRunner {
         `[BuildTaskRunner #${this.buildTaskId}] Generated ${tasksCreated} recording tasks`
       );
 
-      // 3. 如果没有生成任何任务，直接标记为 completed
+      // 3. If no tasks generated, mark as completed directly
       if (tasksCreated === 0) {
         await this.completeBuildTask();
         console.log(
@@ -84,19 +84,19 @@ export class BuildTaskRunner {
         return;
       }
 
-      // 4. 启动心跳
+      // 4. Start heartbeat
       this.startHeartbeat();
 
-      // 5. 进入轮询循环
+      // 5. Enter polling loop
       await this.pollUntilComplete();
 
-      // 6. 停止心跳
+      // 6. Stop heartbeat
       this.stopHeartbeat();
 
-      // 7. 发布新版本 (Blue-Green deployment)
+      // 7. Publish new version (Blue-Green deployment)
       await this.publishVersion(buildTask);
 
-      // 8. 更新 build_task 为 completed
+      // 8. Update build_task to completed
       await this.completeBuildTask();
       console.log(`[BuildTaskRunner #${this.buildTaskId}] Completed successfully`);
     } catch (error) {
@@ -114,7 +114,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 获取 build_task 信息
+   * Get build_task information
    */
   private async getBuildTask(): Promise<BuildTaskInfo | null> {
     const results = await this.db
@@ -147,11 +147,11 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 生成 recording_tasks
-   * 使用原子事务 + UPSERT (ON CONFLICT DO UPDATE)
+   * Generate recording_tasks
+   * Use atomic transaction + UPSERT (ON CONFLICT DO UPDATE)
    */
   private async generateRecordingTasks(buildTask: BuildTaskInfo): Promise<number> {
-    // 1. 获取该 build_task 关联的所有 chunks（通过 documents 表关联 sourceId）
+    // 1. Get all chunks associated with this build_task (linked via documents table using sourceId)
     const chunkResults = await this.db
       .select({
         id: chunks.id,
@@ -167,7 +167,7 @@ export class BuildTaskRunner {
       return 0;
     }
 
-    // 2. 准备 recording_tasks 数据
+    // 2. Prepare recording_tasks data
     const recordingTasksData = chunkResults.map((chunk) => ({
       sourceId: buildTask.sourceId!,
       buildTaskId: this.buildTaskId,
@@ -181,8 +181,8 @@ export class BuildTaskRunner {
       },
     }));
 
-    // 3. 原子插入 (ON CONFLICT DO UPDATE)
-    // 根据状态判断: completed/failed 跳过，pending/running 重置
+    // 3. Atomic insert (ON CONFLICT DO UPDATE)
+    // Based on status: skip completed/failed, reset pending/running
     await this.db.transaction(async (tx) => {
       for (const data of recordingTasksData) {
         await tx
@@ -191,7 +191,7 @@ export class BuildTaskRunner {
           .onConflictDoUpdate({
             target: [recordingTasks.chunkId, recordingTasks.buildTaskId],
             set: {
-              // 只在 pending/running 状态时重置
+              // Only reset when status is pending/running
               status: sql`CASE
                 WHEN ${recordingTasks.status} IN ('pending', 'running') THEN 'pending'
                 ELSE ${recordingTasks.status}
@@ -201,7 +201,7 @@ export class BuildTaskRunner {
           });
       }
 
-      // 更新 build_task 状态为 running
+      // Update build_task status to running
       await tx
         .update(buildTasks)
         .set({
@@ -217,7 +217,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 轮询检查所有 recording_tasks 状态
+   * Poll and check all recording_tasks status
    */
   private async pollUntilComplete(): Promise<void> {
     while (this.running) {
@@ -254,7 +254,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 获取 recording_tasks 状态统计
+   * Get recording_tasks status statistics
    */
   private async getRecordingTasksStatus(): Promise<RecordingTaskStatus> {
     const results = await this.db
@@ -283,11 +283,11 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 重试失败的任务
-   * 只重置 attemptCount < maxAttempts 的任务
+   * Retry failed tasks
+   * Only reset tasks where attemptCount < maxAttempts
    */
   private async retryFailedTasks(): Promise<number> {
-    // 1. 查找可重试的失败任务
+    // 1. Find retriable failed tasks
     const failedTasks = await this.db
       .select()
       .from(recordingTasks)
@@ -307,7 +307,7 @@ export class BuildTaskRunner {
       `[BuildTaskRunner #${this.buildTaskId}] Retrying ${failedTasks.length} failed tasks`
     );
 
-    // 2. 重置为 pending
+    // 2. Reset to pending
     const taskIds = failedTasks.map((t) => t.id);
     await this.db
       .update(recordingTasks)
@@ -327,7 +327,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 启动心跳
+   * Start heartbeat
    */
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
@@ -341,7 +341,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 停止心跳
+   * Stop heartbeat
    */
   private stopHeartbeat(): void {
     if (this.heartbeatTimer) {
@@ -351,7 +351,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 更新心跳时间
+   * Update heartbeat time
    */
   private async updateHeartbeat(): Promise<void> {
     await this.db
@@ -363,7 +363,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 标记 build_task 为 completed
+   * Mark build_task as completed
    */
   private async completeBuildTask(): Promise<void> {
     await this.db
@@ -446,7 +446,7 @@ export class BuildTaskRunner {
   }
 
   /**
-   * 标记 build_task 为 error
+   * Mark build_task as error
    */
   private async failBuildTask(errorMessage: string): Promise<void> {
     await this.db
@@ -464,14 +464,14 @@ export class BuildTaskRunner {
   }
 
   /**
-   * Sleep 工具函数
+   * Sleep utility function
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
-   * 停止运行
+   * Stop running
    */
   stop(): void {
     this.running = false;

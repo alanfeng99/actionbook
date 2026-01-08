@@ -1,18 +1,18 @@
 /**
- * RecordingTaskQueueWorker - 记录任务队列消费者
+ * RecordingTaskQueueWorker - Recording Task Queue Worker
  *
- * 职责:
- * - 持续消费 DB 中的 pending 任务（全局队列）
- * - 执行 recording_task
- * - 更新任务状态到 DB
- * - 维护任务心跳
- * - 恢复 stale 任务
+ * Responsibilities:
+ * - Continuously consume pending tasks from DB (global queue)
+ * - Execute recording_task
+ * - Update task status to DB
+ * - Maintain task heartbeat
+ * - Recover stale tasks
  *
- * 特性:
- * - 全局队列: 不区分 build_task，统一消费所有 pending 任务
- * - 并发控制: 配置 concurrency 参数控制最大并发数
- * - 心跳机制: 定期更新 lastHeartbeat，防止被误认为 stale
- * - Stale 恢复: 启动时和运行中定期检查并恢复 stale 任务
+ * Features:
+ * - Global queue: Does not distinguish build_task, uniformly consumes all pending tasks
+ * - Concurrency control: Configure concurrency parameter to control max concurrent count
+ * - Heartbeat mechanism: Periodically update lastHeartbeat, prevent being mistakenly identified as stale
+ * - Stale recovery: Check and recover stale tasks at startup and periodically during runtime
  */
 
 import type { Database } from '@actionbookdev/db';
@@ -22,15 +22,15 @@ import { TaskExecutor } from './task-executor.js';
 import type { TaskExecutorConfig, RecordingTask } from './types/index.js';
 
 export interface RecordingTaskQueueWorkerConfig extends TaskExecutorConfig {
-  /** 最大并发执行数 */
+  /** Max concurrent execution count */
   concurrency?: number;
-  /** 无任务时等待间隔（毫秒）*/
+  /** Idle wait interval when no tasks (milliseconds) */
   idleWaitMs?: number;
-  /** 任务心跳间隔（毫秒）*/
+  /** Task heartbeat interval (milliseconds) */
   heartbeatIntervalMs?: number;
-  /** 最大重试次数（用于 stale 恢复） */
+  /** Max retry attempts (for stale recovery) */
   maxAttempts?: number;
-  /** Stale 任务判定阈值（分钟）*/
+  /** Stale task detection threshold (minutes) */
   staleTimeoutMinutes?: number;
 }
 
@@ -86,7 +86,7 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 启动队列消费
+   * Start queue consumption
    */
   async start(): Promise<void> {
     if (this.running) {
@@ -99,15 +99,15 @@ export class RecordingTaskQueueWorker {
       `[QueueWorker] Starting with concurrency=${this.config.concurrency}`
     );
 
-    // 启动时恢复 stale 任务
+    // Recover stale tasks at startup
     await this.recoverStaleTasks();
 
-    // 进入主循环
+    // Enter main loop
     await this.mainLoop();
   }
 
   /**
-   * 停止队列消费（优雅关闭）
+   * Stop queue consumption (graceful shutdown)
    */
   async stop(timeoutMs?: number): Promise<void> {
     if (!this.running) {
@@ -120,7 +120,7 @@ export class RecordingTaskQueueWorker {
     );
     this.running = false;
 
-    // 等待所有执行中的任务完成
+    // Wait for all executing tasks to complete
     const startTime = Date.now();
     while (this.runningTasks.size > 0) {
       if (
@@ -132,13 +132,13 @@ export class RecordingTaskQueueWorker {
             `${this.runningTasks.size} tasks still running`
         );
 
-        // 记录未完成任务
+        // Log incomplete tasks
         const incompleteTasks = Array.from(this.runningTasks.keys());
         console.log(
           `[QueueWorker] Incomplete tasks: ${incompleteTasks.join(', ')}`
         );
 
-        // 停止所有心跳
+        // Stop all heartbeats
         for (const task of this.runningTasks.values()) {
           clearInterval(task.heartbeatTimer);
         }
@@ -152,38 +152,38 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 主循环
+   * Main loop
    */
   private async mainLoop(): Promise<void> {
     while (this.running) {
       try {
-        // 1. 恢复 stale 任务
+        // 1. Recover stale tasks
         await this.recoverStaleTasks();
 
-        // 2. 填充执行槽位
+        // 2. Fill execution slots
         while (
           this.running &&
           this.runningTasks.size < this.config.concurrency
         ) {
-          // 2.1 原子性领取一个 pending 任务
+          // 2.1 Atomically claim a pending task
           const task = await this.claimTask();
 
           if (!task) {
-            // 无任务可领取，跳出填充循环
+            // No task available to claim, break out of filling loop
             break;
           }
 
-          // 2.2 启动执行（非阻塞）
+          // 2.2 Start execution (non-blocking)
           await this.startExecution(task);
         }
 
-        // 3. 如果无执行中任务，等待后继续
+        // 3. If no executing tasks, wait before continuing
         if (this.runningTasks.size === 0) {
           await this.sleep(this.config.idleWaitMs);
           continue;
         }
 
-        // 4. 等待任意一个任务完成
+        // 4. Wait for any task to complete
         await Promise.race(
           Array.from(this.runningTasks.values()).map((t) => t.promise)
         );
@@ -195,8 +195,8 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 原子性领取一个 pending 任务
-   * 使用 FOR UPDATE SKIP LOCKED 确保并发安全
+   * Atomically claim a pending task
+   * Use FOR UPDATE SKIP LOCKED to ensure concurrency safety
    */
   private async claimTask(): Promise<RecordingTask | null> {
     try {
@@ -211,9 +211,9 @@ export class RecordingTaskQueueWorker {
           SELECT id
           FROM ${recordingTasks}
           WHERE status = 'pending'
-          ORDER BY updated_at DESC, id  -- 重试任务优先（刚被更新）
+          ORDER BY updated_at DESC, id  -- Retry tasks priority (recently updated)
           LIMIT 1
-          FOR UPDATE SKIP LOCKED  -- 跳过已锁定行
+          FOR UPDATE SKIP LOCKED  -- Skip locked rows
         )
         RETURNING *
       `);
@@ -245,22 +245,22 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 启动任务执行
+   * Start task execution
    */
   private async startExecution(task: RecordingTask): Promise<void> {
     console.log(`[QueueWorker] Starting task #${task.id}`);
 
-    // 创建 TaskExecutor
+    // Create TaskExecutor
     const executor = new TaskExecutor(this.db, this.config);
 
-    // 启动心跳
+    // Start heartbeat
     const heartbeatTimer = setInterval(() => {
       this.updateTaskHeartbeat(task.id).catch((error: unknown) => {
         console.error(`[QueueWorker] Task #${task.id} heartbeat error:`, error);
       });
     }, this.config.heartbeatIntervalMs);
 
-    // 执行任务（非阻塞）
+    // Execute task (non-blocking)
     const promise = executor
       .execute(task)
       .then(() => {
@@ -270,12 +270,12 @@ export class RecordingTaskQueueWorker {
         console.error(`[QueueWorker] Task #${task.id} failed:`, error);
       })
       .finally(() => {
-        // 清理
+        // Cleanup
         clearInterval(heartbeatTimer);
         this.runningTasks.delete(task.id);
       });
 
-    // 保存到运行任务列表
+    // Save to running tasks list
     this.runningTasks.set(task.id, {
       id: task.id,
       executor,
@@ -285,7 +285,7 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 更新任务心跳
+   * Update task heartbeat
    */
   private async updateTaskHeartbeat(taskId: number): Promise<void> {
     await this.db
@@ -298,8 +298,8 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * 恢复 stale 任务
-   * 查找 running 但 lastHeartbeat 超时的任务
+   * Recover stale tasks
+   * Find tasks that are running but lastHeartbeat has timed out
    */
   private async recoverStaleTasks(): Promise<void> {
     try {
@@ -352,14 +352,14 @@ export class RecordingTaskQueueWorker {
   }
 
   /**
-   * Sleep 工具函数
+   * Sleep utility function
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
-   * 获取当前运行状态
+   * Get current running status
    */
   getStatus(): {
     running: boolean;

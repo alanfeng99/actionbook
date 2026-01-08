@@ -1,11 +1,11 @@
 /**
- * Coordinator - 协调器
+ * Coordinator
  *
- * 职责:
- * - 启动并管理 RecordingTaskQueueWorker
- * - 持续获取新的 build_task 并启动 BuildTaskRunner
- * - 控制最大并发 build_task 数量
- * - 处理优雅关闭
+ * Responsibilities:
+ * - Start and manage RecordingTaskQueueWorker
+ * - Continuously claim new build_tasks and start BuildTaskRunners
+ * - Control max concurrent build_tasks
+ * - Handle graceful shutdown
  */
 
 import type { Database } from '@actionbookdev/db';
@@ -18,15 +18,15 @@ import {
 } from './recording-task-queue-worker.js';
 
 export interface CoordinatorConfig {
-  /** 最大并发 build_task 数量 */
+  /** Max concurrent build_tasks */
   maxConcurrentBuildTasks?: number;
-  /** build_task 轮询间隔（秒）*/
+  /** Build task polling interval (seconds) */
   buildTaskPollIntervalSeconds?: number;
-  /** build_task stale 判定阈值（分钟），用于重启恢复 action_build/running 的任务 */
+  /** Stale build_task timeout (minutes) for crash recovery of action_build/running tasks */
   buildTaskStaleTimeoutMinutes?: number;
-  /** BuildTaskRunner 配置 */
+  /** BuildTaskRunner configuration */
   buildTaskRunner?: BuildTaskRunnerConfig;
-  /** RecordingTaskQueueWorker 配置 */
+  /** RecordingTaskQueueWorker configuration */
   queueWorker?: RecordingTaskQueueWorkerConfig;
 }
 
@@ -44,7 +44,7 @@ export class Coordinator {
   private running = false;
   private metricsTimer?: NodeJS.Timeout;
   private lastMetricsTime = Date.now();
-  private metricsIntervalMs = 30000; // 30 秒
+  private metricsIntervalMs = 30000; // 30 seconds
 
   constructor(db: Database, config: CoordinatorConfig = {}) {
     this.db = db;
@@ -56,7 +56,7 @@ export class Coordinator {
       queueWorker: config.queueWorker ?? {} as RecordingTaskQueueWorkerConfig,
     };
 
-    // 创建 QueueWorker
+    // Create QueueWorker
     this.queueWorker = new RecordingTaskQueueWorker(
       db,
       this.config.queueWorker
@@ -64,7 +64,7 @@ export class Coordinator {
   }
 
   /**
-   * 启动协调器
+   * Start coordinator
    */
   async start(): Promise<void> {
     if (this.running) {
@@ -77,20 +77,20 @@ export class Coordinator {
       `[Coordinator] Starting with maxConcurrentBuildTasks=${this.config.maxConcurrentBuildTasks}`
     );
 
-    // 1. 启动 QueueWorker（后台运行）
+    // 1. Start QueueWorker (background)
     this.queueWorker.start().catch((error: unknown) => {
       console.error('[Coordinator] QueueWorker error:', error);
     });
 
-    // 2. 启动监控指标输出
+    // 2. Start metrics output
     this.startMetrics();
 
-    // 3. 进入主循环
+    // 3. Enter main loop
     await this.mainLoop();
   }
 
   /**
-   * 停止协调器（优雅关闭）
+   * Stop coordinator (graceful shutdown)
    */
   async stop(timeoutMs?: number): Promise<void> {
     if (!this.running) {
@@ -100,13 +100,13 @@ export class Coordinator {
     console.log('[Coordinator] Stopping gracefully...');
     this.running = false;
 
-    // 1. 停止监控指标
+    // 1. Stop metrics output
     this.stopMetrics();
 
-    // 2. 停止 QueueWorker
+    // 2. Stop QueueWorker
     await this.queueWorker.stop(timeoutMs);
 
-    // 3. 等待所有 BuildTaskRunner 完成
+    // 3. Wait for all BuildTaskRunners to complete
     const startTime = Date.now();
     while (this.runningBuildTasks.size > 0) {
       if (timeoutMs && Date.now() - startTime > timeoutMs) {
@@ -123,15 +123,15 @@ export class Coordinator {
   }
 
   /**
-   * 主循环
+   * Main loop
    */
   private async mainLoop(): Promise<void> {
     while (this.running) {
       try {
-        // 1. 清理已完成的 build_task
+        // 1. Cleanup completed build_tasks
         this.cleanupCompletedTasks();
 
-        // 2. 如果有空闲槽位，领取新的 build_task
+        // 2. Claim new build_tasks if slots available
         while (
           this.running &&
           this.runningBuildTasks.size < this.config.maxConcurrentBuildTasks
@@ -139,15 +139,15 @@ export class Coordinator {
           const buildTask = await this.claimBuildTask();
 
           if (!buildTask) {
-            // 无可领取的 build_task
+            // No claimable build_task
             break;
           }
 
-          // 启动 BuildTaskRunner（非阻塞）
+          // Start BuildTaskRunner (non-blocking)
           this.startBuildTaskRunner(buildTask.id);
         }
 
-        // 3. 等待后继续
+        // 3. Wait before continuing
         await this.sleep(this.config.buildTaskPollIntervalSeconds * 1000);
       } catch (error) {
         console.error('[Coordinator] Main loop error:', error);
@@ -157,8 +157,8 @@ export class Coordinator {
   }
 
   /**
-   * 领取一个 build_task
-   * 查找 stage=knowledge_build, stage_status=completed 的任务
+   * Claim a build_task
+   * Find tasks with stage=knowledge_build, stage_status=completed
    */
   private async claimBuildTask(): Promise<{ id: number } | null> {
     try {
@@ -206,7 +206,7 @@ export class Coordinator {
   }
 
   /**
-   * 启动 BuildTaskRunner（非阻塞）
+   * Start BuildTaskRunner (non-blocking)
    */
   private startBuildTaskRunner(buildTaskId: number): void {
     console.log(`[Coordinator] Starting BuildTaskRunner #${buildTaskId}`);
@@ -240,14 +240,14 @@ export class Coordinator {
   }
 
   /**
-   * 清理已完成的 build_task
+   * Cleanup completed build_tasks
    */
   private cleanupCompletedTasks(): void {
-    // Promise 的 finally 已经处理了删除，这里不需要额外操作
+    // Promise's finally already handles deletion, no additional operation needed here
   }
 
   /**
-   * 启动监控指标输出
+   * Start metrics output
    */
   private startMetrics(): void {
     this.metricsTimer = setInterval(() => {
@@ -256,14 +256,14 @@ export class Coordinator {
       });
     }, this.metricsIntervalMs);
 
-    // 立即输出一次
+    // Output immediately once
     this.outputMetrics().catch((error: unknown) => {
       console.error('[Coordinator] Metrics error:', error);
     });
   }
 
   /**
-   * 停止监控指标输出
+   * Stop metrics output
    */
   private stopMetrics(): void {
     if (this.metricsTimer) {
@@ -273,7 +273,7 @@ export class Coordinator {
   }
 
   /**
-   * 输出监控指标
+   * Output metrics
    */
   private async outputMetrics(): Promise<void> {
     const queueStatus = this.queueWorker.getStatus();
@@ -287,7 +287,7 @@ export class Coordinator {
         `elapsed=${elapsedSeconds.toFixed(1)}s`
     );
 
-    // 输出每个 build_task 的详细状态
+    // Output detailed status for each build_task
     if (this.runningBuildTasks.size > 0) {
       for (const [buildTaskId] of this.runningBuildTasks) {
         try {
@@ -317,7 +317,7 @@ export class Coordinator {
   }
 
   /**
-   * 获取 build_task 详细信息
+   * Get build_task detailed information
    */
   private async getBuildTaskDetails(buildTaskId: number): Promise<{
     sourceName: string;
@@ -372,14 +372,14 @@ export class Coordinator {
   }
 
   /**
-   * Sleep 工具函数
+   * Sleep utility function
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
-   * 获取当前运行状态
+   * Get current running status
    */
   getStatus(): {
     running: boolean;
