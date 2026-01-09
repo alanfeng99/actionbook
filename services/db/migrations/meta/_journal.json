@@ -120,6 +120,13 @@
       "when": 1767978847712,
       "tag": "0016_chief_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1767980420513,
+      "tag": "0017_nostalgic_loa",
+      "breakpoints": true
     }
   ]
 }
