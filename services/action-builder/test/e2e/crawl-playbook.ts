@@ -33,10 +33,11 @@ requireLLMApiKey();
 
 // Default configuration
 const DEFAULT_MAX_DEPTH = 3;
-const DEFAULT_MAX_PAGES = 100;
+const DEFAULT_MAX_PAGES = 30;
 const DEFAULT_PAGE_LOAD_TIMEOUT = 30000;
 const DEFAULT_OUTPUT_DIR = "./output";
 const DEFAULT_HTML_LIMIT = 20000;
+const DEFAULT_CONCURRENCY = 5;
 
 // Runtime configuration (set by parseArgs)
 interface Config {
@@ -45,6 +46,7 @@ interface Config {
   pageLoadTimeout: number;
   outputDir: string;
   htmlLimit: number;
+  concurrency: number;
 }
 
 let config: Config = {
@@ -53,6 +55,7 @@ let config: Config = {
   pageLoadTimeout: DEFAULT_PAGE_LOAD_TIMEOUT,
   outputDir: DEFAULT_OUTPUT_DIR,
   htmlLimit: DEFAULT_HTML_LIMIT,
+  concurrency: DEFAULT_CONCURRENCY,
 };
 
 // Page info structure (single page crawl result)
@@ -414,9 +417,7 @@ const PLAYBOOK_MERGE_SYSTEM_PROMPT = `You are a senior web automation architect.
 Generate the merged Markdown document strictly following these 7 sections:
 
 ### 0. Page URL
-- Use pattern format, e.g., https://example.com/docs/{version}/
-- List params variable descriptions
-- List 1-3 specific page examples
+
 \${url_pattern}
 - Query parameters: one per line, brief description
     - \${name}: \${description}
@@ -426,6 +427,8 @@ Generate the merged Markdown document strictly following these 7 sections:
     - \${url1}
     - \${url2}
     - \${url3}
+
+* hint: just keep the format, no need to hightlight format
 
 ### 1. Page Overview
 Clearly define the core business objective of this page type in one sentence.
@@ -597,6 +600,7 @@ async function crawlSite(startUrl: string): Promise<MergedCrawlResult> {
   console.log(`Domain: ${domain}`);
   console.log(`Max Depth: ${config.maxDepth}`);
   console.log(`Max Pages: ${config.maxPages}`);
+  console.log(`Concurrency: ${config.concurrency}`);
   console.log(`HTML Limit: ${config.htmlLimit} chars`);
   console.log(`LLM Provider: ${provider}`);
   console.log(`LLM Model: ${model}`);
@@ -607,40 +611,57 @@ async function crawlSite(startUrl: string): Promise<MergedCrawlResult> {
   const aiClient = new AIClient();
 
   try {
-    // Phase 1: BFS crawl all pages (serial)
-    console.log("\n📥 Phase 1: Crawling pages...\n");
+    // Phase 1: BFS crawl all pages (concurrent batch processing)
+    console.log(`\n📥 Phase 1: Crawling pages (concurrency: ${config.concurrency})...\n`);
 
+    // Process queue in concurrent batches
     while (queue.length > 0 && pages.length < config.maxPages) {
-      const { url, depth } = queue.shift()!;
-
-      // Normalize URL
-      const normalizedUrl = normalizeUrl(url, startUrl);
-      if (!normalizedUrl || visited.has(normalizedUrl)) {
-        continue;
+      // Get next batch of URLs (up to concurrency limit)
+      const batch: { url: string; depth: number }[] = [];
+      while (batch.length < config.concurrency && queue.length > 0) {
+        const task = queue.shift();
+        if (task) {
+          // Normalize and check if already visited
+          const normalizedUrl = normalizeUrl(task.url, startUrl);
+          if (normalizedUrl && !visited.has(normalizedUrl)) {
+            visited.add(normalizedUrl);
+            batch.push({ url: normalizedUrl, depth: task.depth });
+          }
+        }
       }
 
-      visited.add(normalizedUrl);
+      if (batch.length === 0) {
+        break; // No valid URLs to process
+      }
 
-      // Crawl page
-      const pageInfo = await crawlPage(
-        browser,
-        aiClient,
-        normalizedUrl,
-        domain,
-        depth,
-        visited
+      // Process batch concurrently
+      const batchResults = await Promise.all(
+        batch.map(({ url, depth }) =>
+          crawlPage(browser, aiClient, url, domain, depth, visited)
+        )
       );
 
-      if (pageInfo) {
-        pages.push(pageInfo);
+      // Collect results and add new links to queue
+      for (let i = 0; i < batchResults.length; i++) {
+        const pageInfo = batchResults[i];
+        const { depth } = batch[i];
 
-        // Add new links to queue if not at max depth
-        if (depth < config.maxDepth) {
-          for (const link of pageInfo.links) {
-            if (!visited.has(link)) {
-              queue.push({ url: link, depth: depth + 1 });
+        if (pageInfo) {
+          pages.push(pageInfo);
+
+          // Add new links to queue if not at max depth
+          if (depth < config.maxDepth) {
+            for (const link of pageInfo.links) {
+              if (!visited.has(link)) {
+                queue.push({ url: link, depth: depth + 1 });
+              }
             }
           }
+        }
+
+        // Stop if we've reached max pages
+        if (pages.length >= config.maxPages) {
+          break;
         }
       }
     }
@@ -849,11 +870,13 @@ Options:
   --max-pages <n>      Maximum pages to crawl (default: ${DEFAULT_MAX_PAGES})
   --timeout <ms>       Page load timeout in ms (default: ${DEFAULT_PAGE_LOAD_TIMEOUT})
   --html-limit <n>     HTML content limit in chars (default: ${DEFAULT_HTML_LIMIT})
+  --concurrency <n>    Number of concurrent workers (default: ${DEFAULT_CONCURRENCY})
   --help, -h           Show help information
 
 Examples:
   npx tsx test/e2e/crawl-playbook.ts https://releases.rs
   npx tsx test/e2e/crawl-playbook.ts https://example.com --max-pages 50 --max-depth 2
+  npx tsx test/e2e/crawl-playbook.ts https://example.com --concurrency 5 --max-pages 100
   npx tsx test/e2e/crawl-playbook.ts https://example.com --output ./my-output --timeout 60000
 `);
     process.exit(0);
@@ -879,6 +902,9 @@ Examples:
       i++;
     } else if (arg === "--html-limit" && nextArg) {
       config.htmlLimit = parseInt(nextArg, 10);
+      i++;
+    } else if (arg === "--concurrency" && nextArg) {
+      config.concurrency = parseInt(nextArg, 10);
       i++;
     }
   }
