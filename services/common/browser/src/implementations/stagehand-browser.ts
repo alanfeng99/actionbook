@@ -307,94 +307,172 @@ export class StagehandBrowser implements BrowserAdapter {
   // AI Capabilities
   // ============================================
 
+  /**
+   * Observe page elements using Stagehand AI with rate limit retry
+   *
+   * @param instruction - Natural language instruction for what to observe
+   * @param timeoutMs - Timeout in milliseconds, default: 30000 (30 seconds)
+   */
   async observe(instruction: string, timeoutMs: number = 30000): Promise<ObserveResult[]> {
     if (!this.stagehand) {
       throw new Error('Browser not initialized. Call initialize() first.');
     }
 
-    const startTime = Date.now();
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`observe timeout after ${timeoutMs}ms`)),
-          timeoutMs
-        )
-      );
+    const maxRetries = 3;
+    let lastError: unknown;
 
-      const result = await Promise.race([
-        this.stagehand.observe(instruction),
-        timeoutPromise,
-      ]);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const startTime = Date.now();
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`observe timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          )
+        );
 
-      await this.logStagehandMetrics('observe', startTime);
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      log('error', `[StagehandBrowser] observe() failed: ${errorMessage}`);
-      // Log full error for debugging
-      if (error instanceof Error && error.stack) {
-        log('error', `[StagehandBrowser] Stack: ${error.stack.substring(0, 500)}`);
+        const result = await Promise.race([
+          this.stagehand.observe(instruction),
+          timeoutPromise,
+        ]);
+
+        await this.logStagehandMetrics('observe', startTime);
+
+        // Log retry success if this was a retry
+        if (attempt > 0) {
+          log('info', `[StagehandBrowser] observe() succeeded on retry ${attempt}/${maxRetries}`);
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Check if this is a rate limit error
+        const isRateLimit = this.isRateLimitError(error);
+
+        // If rate limit and not last attempt, retry with exponential backoff
+        if (isRateLimit && attempt < maxRetries) {
+          const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000); // Cap at 30s
+          log('warn', `[StagehandBrowser] Rate limit detected on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        // Log error
+        log('error', `[StagehandBrowser] observe() failed: ${errorMessage}`);
+        // Log full error for debugging
+        if (error instanceof Error && error.stack) {
+          log('error', `[StagehandBrowser] Stack: ${error.stack.substring(0, 500)}`);
+        }
+
+        // If not rate limit or last attempt, throw immediately
+        if (!isRateLimit || attempt >= maxRetries) {
+          throw error;
+        }
       }
-      throw error;
     }
+
+    // Should never reach here, but throw last error just in case
+    throw lastError;
   }
 
+  /**
+   * Perform an action using Stagehand AI with rate limit retry
+   * Supports both natural language instructions and predefined action objects
+   *
+   * @param instructionOrAction - Natural language instruction string OR ActionObject with selector
+   * @returns Action result from Stagehand
+   * @throws ElementNotFoundError if element cannot be found
+   * @throws ActionExecutionError if action fails to execute
+   */
   async act(instructionOrAction: string | ActionObject): Promise<unknown> {
     if (!this.stagehand) {
       throw new Error('Browser not initialized. Call initialize() first.');
     }
 
-    const startTime = Date.now();
-    try {
-      // Handle string instruction vs ActionObject separately for Stagehand's overloads
-      let result: unknown;
-      if (typeof instructionOrAction === 'string') {
-        result = await this.stagehand.act(instructionOrAction);
-      } else {
-        // Convert ActionObject to Stagehand's Action format
-        result = await this.stagehand.act({
-          action: instructionOrAction.description ?? `${instructionOrAction.method} on ${instructionOrAction.selector}`,
-          ...instructionOrAction,
-        } as Parameters<typeof this.stagehand.act>[0]);
-      }
-      await this.logStagehandMetrics('act', startTime);
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+    const maxRetries = 3;
+    let lastError: unknown;
 
-      if (
-        errorMessage.includes('No object generated') ||
-        errorMessage.includes('response did not match schema') ||
-        errorMessage.includes('Could not find element')
-      ) {
-        const selector =
-          typeof instructionOrAction === 'string'
-            ? undefined
-            : instructionOrAction.selector;
-        throw new ElementNotFoundError(
-          'Element not found or action could not be performed.',
-          selector
-        );
-      }
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const startTime = Date.now();
+      try {
+        // Handle string instruction vs ActionObject separately for Stagehand's overloads
+        let result: unknown;
+        if (typeof instructionOrAction === 'string') {
+          result = await this.stagehand.act(instructionOrAction);
+        } else {
+          // Convert ActionObject to Stagehand's Action format
+          result = await this.stagehand.act({
+            action: instructionOrAction.description ?? `${instructionOrAction.method} on ${instructionOrAction.selector}`,
+            ...instructionOrAction,
+          } as Parameters<typeof this.stagehand.act>[0]);
+        }
+        await this.logStagehandMetrics('act', startTime);
 
-      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
-        throw new ActionExecutionError(
-          'Action timed out. The element may be loading or not interactive.',
-          typeof instructionOrAction === 'string'
-            ? instructionOrAction
-            : instructionOrAction.method,
-          error instanceof Error ? error : undefined
-        );
-      }
+        // Log retry success if this was a retry
+        if (attempt > 0) {
+          log('info', `[StagehandBrowser] act() succeeded on retry ${attempt}/${maxRetries}`);
+        }
 
-      throw new ActionExecutionError(
-        `Failed to execute action: ${errorMessage}`,
-        typeof instructionOrAction === 'string'
-          ? instructionOrAction
-          : instructionOrAction.method,
-        error instanceof Error ? error : undefined
-      );
+        return result;
+      } catch (error) {
+        lastError = error;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Check if this is a rate limit error
+        const isRateLimit = this.isRateLimitError(error);
+
+        // If rate limit and not last attempt, retry with exponential backoff
+        if (isRateLimit && attempt < maxRetries) {
+          const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000); // Cap at 30s
+          log('warn', `[StagehandBrowser] Rate limit detected in act() on attempt ${attempt + 1}/${maxRetries + 1}, retrying in ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        // Handle "Element not found" type errors
+        if (
+          errorMessage.includes('No object generated') ||
+          errorMessage.includes('response did not match schema') ||
+          errorMessage.includes('Could not find element')
+        ) {
+          const selector =
+            typeof instructionOrAction === 'string'
+              ? undefined
+              : instructionOrAction.selector;
+          throw new ElementNotFoundError(
+            'Element not found or action could not be performed. The page may have changed or the element is not visible.',
+            selector
+          );
+        }
+
+        // Handle timeout errors
+        if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+          throw new ActionExecutionError(
+            'Action timed out. The element may be loading or not interactive.',
+            typeof instructionOrAction === 'string'
+              ? instructionOrAction
+              : instructionOrAction.method,
+            error instanceof Error ? error : undefined
+          );
+        }
+
+        // If not rate limit or last attempt, throw with better context
+        if (!isRateLimit || attempt >= maxRetries) {
+          throw new ActionExecutionError(
+            `Failed to execute action: ${errorMessage}`,
+            typeof instructionOrAction === 'string'
+              ? instructionOrAction
+              : instructionOrAction.method,
+            error instanceof Error ? error : undefined
+          );
+        }
+      }
     }
+
+    // Should never reach here, but throw last error just in case
+    throw lastError;
   }
 
   async actWithSelector(action: ActionObject): Promise<unknown> {
@@ -634,6 +712,18 @@ export class StagehandBrowser implements BrowserAdapter {
       throw new Error('Browser not initialized. Call initialize() first.');
     }
     return this.page;
+  }
+
+  /**
+   * Check if error is a rate limit error
+   */
+  private isRateLimitError(error: unknown): boolean {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return (
+      errorMsg.toLowerCase().includes('too many tokens') ||
+      errorMsg.toLowerCase().includes('rate limit') ||
+      errorMsg.toLowerCase().includes('429')
+    );
   }
 
   private async buildLLMConfig(): Promise<{
