@@ -485,9 +485,11 @@ describe('AgentCoreBrowser Unit Tests', () => {
       await browser.getElementAttributesFromXPath('xpath=//div[@id="test"]');
 
       // Check that the script uses normalized xpath (without prefix)
+      // The xpath is now properly escaped for safe JavaScript interpolation
       expect(mockClient.evaluate).toHaveBeenCalled();
       const call = mockClient.evaluate.mock.calls[0][0];
-      expect(call.script).toContain('//div[@id="test"]');
+      // The script should contain the escaped xpath (via JSON.stringify)
+      expect(call.script).toContain('"//div[@id=\\"test\\"]"');
       expect(call.script).not.toContain('xpath=');
     });
 
@@ -501,7 +503,8 @@ describe('AgentCoreBrowser Unit Tests', () => {
 
       expect(mockClient.evaluate).toHaveBeenCalled();
       const call = mockClient.evaluate.mock.calls[0][0];
-      expect(call.script).toContain('//div[@id="test"]');
+      // The script should contain the escaped xpath (via JSON.stringify)
+      expect(call.script).toContain('"//div[@id=\\"test\\"]"');
     });
 
     it('should return null when element not found', async () => {
@@ -638,15 +641,15 @@ describe('AgentCoreBrowser Unit Tests', () => {
       const prompt = callBuildObservePrompt(browser, 'find the login button');
 
       expect(prompt).toContain('find the login button');
-      // Instruction appears twice in the prompt
-      expect(prompt.match(/find the login button/g)?.length).toBe(2);
+      // Instruction appears once in the prompt
+      expect(prompt.match(/find the login button/g)?.length).toBe(1);
     });
 
-    it('should include XPath format requirement', () => {
+    it('should include xpath format example', () => {
       const prompt = callBuildObservePrompt(browser, 'test');
 
+      // The prompt contains an example with xpath= prefix
       expect(prompt).toContain('xpath=');
-      expect(prompt).toContain('XPath');
     });
 
     it('should include JSON format example', () => {

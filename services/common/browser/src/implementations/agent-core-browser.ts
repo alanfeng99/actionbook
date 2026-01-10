@@ -535,9 +535,12 @@ export class AgentCoreBrowser implements BrowserAdapter {
           return { success: true, action: method, text: args[0] };
 
         case 'hover':
-          // Hover via JavaScript
+          // Hover via JavaScript - support both XPath and CSS selectors
           await client.evaluate({
-            script: `document.evaluate("${selector.replace('xpath=', '')}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`,
+            script: this.buildElementScript(
+              selector,
+              `el?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))`
+            ),
           });
           return { success: true, action: 'hover' };
 
@@ -546,10 +549,10 @@ export class AgentCoreBrowser implements BrowserAdapter {
             throw new Error('select action requires value argument');
           }
           await client.evaluate({
-            script: `(() => {
-              const el = document.evaluate("${selector.replace('xpath=', '')}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-              if (el) { el.value = "${args[0]}"; el.dispatchEvent(new Event('change', { bubbles: true })); }
-            })()`,
+            script: this.buildElementScript(
+              selector,
+              `if (el) { el.value = ${this.escapeForJs(args[0])}; el.dispatchEvent(new Event('change', { bubbles: true })); }`
+            ),
           });
           return { success: true, action: 'select', value: args[0] };
 
@@ -589,10 +592,12 @@ export class AgentCoreBrowser implements BrowserAdapter {
     try {
       // Normalize xpath (remove 'xpath=' prefix if present)
       const normalizedXpath = xpath.replace(/^xpath=/, '');
+      // Escape quotes for safe JavaScript interpolation
+      const escapedXpath = this.escapeForJs(normalizedXpath);
 
       const attrs = await client.evaluate({
         script: `(() => {
-          const el = document.evaluate("${normalizedXpath}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+          const el = document.evaluate(${escapedXpath}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
           if (!el) return null;
 
           // Collect data-* attributes
@@ -730,6 +735,34 @@ export class AgentCoreBrowser implements BrowserAdapter {
       throw new Error('Browser not initialized. Call initialize() first.');
     }
     return this.client;
+  }
+
+  /**
+   * Escape a string for safe JavaScript interpolation
+   * Uses JSON.stringify which properly escapes quotes, backslashes, and special characters
+   */
+  private escapeForJs(str: string): string {
+    return JSON.stringify(str);
+  }
+
+  /**
+   * Check if a selector is an XPath selector
+   */
+  private isXPathSelector(selector: string): boolean {
+    return selector.startsWith('xpath=') || selector.startsWith('/') || selector.startsWith('(');
+  }
+
+  /**
+   * Build a JavaScript script that finds an element by selector (XPath or CSS) and executes an action
+   * @param selector - The selector (XPath or CSS)
+   * @param action - JavaScript code to execute with 'el' as the element variable
+   */
+  private buildElementScript(selector: string, action: string): string {
+    const cleanSelector = selector.replace(/^xpath=/, '');
+    if (this.isXPathSelector(selector)) {
+      return `(() => { const el = document.evaluate(${this.escapeForJs(cleanSelector)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; ${action} })()`;
+    }
+    return `(() => { const el = document.querySelector(${this.escapeForJs(cleanSelector)}); ${action} })()`;
   }
 
   /**
