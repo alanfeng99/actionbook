@@ -2,7 +2,7 @@
 /**
  * Crawl Playbook Batch Runner
  *
- * 逐个（串行）调用 test/e2e/crawl-playbook.ts 爬取网站，并汇总生成的 JSON 结果。
+ * Sequentially calls test/e2e/crawl-playbook.ts to crawl websites and aggregates JSON results.
  *
  * Usage:
  *   npx tsx scripts/crawl-playbook-batch.ts
@@ -10,8 +10,8 @@
  *   npx tsx scripts/crawl-playbook-batch.ts --output ./output --summary-output ./output/batch_summary.json
  *
  * Notes:
- * - 每个站点的输出仍由 crawl-playbook.ts 写入：output/sites/{domain}/crawl_playbooks/*.json
- * - 本脚本从 stdout 解析 "JSON saved:" 行来定位文件，然后读取并汇总
+ * - Each site's output is still written by crawl-playbook.ts: output/sites/{domain}/crawl_playbooks/*.json
+ * - This script parses "JSON saved:" lines from stdout to locate files, then reads and aggregates them
  */
 
 import fs from 'node:fs'

@@ -276,7 +276,7 @@ function formatPageAsMarkdown(page: MergedPageInfo | LegacyPageInfo): string {
   lines.push(`**URL:** ${page.url}`);
   lines.push(`**Depth:** ${page.depth}`);
   lines.push("");
-  lines.push("## 页面功能");
+  lines.push("## Page Features");
   lines.push("");
   page.features.forEach((f, i) => {
     lines.push(`${i + 1}. ${f}`);

@@ -152,7 +152,7 @@ export class BuildTaskRunner {
    * Use atomic transaction + UPSERT (ON CONFLICT DO UPDATE)
    */
   private async generateRecordingTasks(buildTask: BuildTaskInfo): Promise<number> {
-    // 1. Get all chunks associated with this build_task (linked via documents table using sourceId)
+    // 1. Get all chunks associated with this build_task (linked via documents table using sourceVersionId)
     const chunkResults = await this.db
       .select({
         id: chunks.id,
@@ -161,7 +161,12 @@ export class BuildTaskRunner {
       })
       .from(chunks)
       .innerJoin(documents, eq(chunks.documentId, documents.id))
-      .where(eq(documents.sourceId, buildTask.sourceId!))
+      .where(
+        and(
+          eq(documents.sourceId, buildTask.sourceId!),
+          eq(documents.sourceVersionId, buildTask.sourceVersionId!)
+        )
+      )
       .orderBy(chunks.id);
 
     if (chunkResults.length === 0) {
