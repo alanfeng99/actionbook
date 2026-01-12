@@ -2,16 +2,21 @@
  * Get Action by ID Endpoint
  * GET /api/actions/:id
  *
- * Now supports chunk_id as action_id
+ * Supports URL-based action_id (e.g., "https://example.com/page" or "https://example.com/page#chunk-1")
  * Returns complete chunk information from database
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import type { ApiError } from '@/lib/types'
-import { getDb, chunks, documents, eq } from '@actionbookdev/db'
+import { getDb, chunks, documents, eq, and } from '@actionbookdev/db'
+import {
+  parseActionId,
+  generateActionId,
+  isValidActionId,
+} from '@/lib/action-id'
 
 interface ActionContent {
-  action_id: number
+  action_id: string
   content: string
   elements: string | null
   createdAt: string
@@ -30,25 +35,26 @@ export async function GET(
   const { id } = (await params) as { id: string[] }
   const actionId = id.join('/')
 
-  // Parse action_id as integer (chunk_id)
-  const chunkId = parseInt(actionId, 10)
-
-  if (isNaN(chunkId)) {
+  // Validate URL-based action ID
+  if (!isValidActionId(actionId)) {
     return NextResponse.json(
       {
         error: 'INVALID_ID',
         code: '400',
-        message: `Invalid action ID '${actionId}'. Expected a numeric chunk ID.`,
-        suggestion: 'Use search to find valid action IDs.',
+        message: `Invalid action ID '${actionId}'. Expected a URL-based ID.`,
+        suggestion:
+          "Use search to find valid action IDs. Format: 'https://example.com/page' or 'https://example.com/page#chunk-1'",
       },
       { status: 400 }
     )
   }
 
+  const { documentUrl, chunkIndex } = parseActionId(actionId)
+
   try {
     const db = getDb()
 
-    // Query chunk with document info, elements now comes from chunks table
+    // Query chunk by document URL and chunk index
     const results = await db
       .select({
         chunkId: chunks.id,
@@ -64,7 +70,7 @@ export async function GET(
       })
       .from(chunks)
       .innerJoin(documents, eq(chunks.documentId, documents.id))
-      .where(eq(chunks.id, chunkId))
+      .where(and(eq(documents.url, documentUrl), eq(chunks.chunkIndex, chunkIndex)))
       .limit(1)
 
     if (results.length === 0) {
@@ -72,8 +78,9 @@ export async function GET(
         {
           error: 'NOT_FOUND',
           code: '404',
-          message: `Action with ID '${chunkId}' not found`,
-          suggestion: 'Use search to find available actions.',
+          message: `Action '${actionId}' not found`,
+          suggestion:
+            'The document may have been updated. Use search to find current action IDs.',
         },
         { status: 404 }
       )
@@ -82,7 +89,7 @@ export async function GET(
     const chunk = results[0]
 
     return NextResponse.json({
-      action_id: chunk.chunkId,
+      action_id: generateActionId(chunk.documentUrl, chunk.chunkIndex),
       content: chunk.content,
       elements: chunk.elements,
       createdAt: chunk.createdAt.toISOString(),
