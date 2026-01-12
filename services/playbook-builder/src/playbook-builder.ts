@@ -30,7 +30,7 @@ import { PageAnalyzer } from './analyzer/index.js';
  * PlaybookBuilder - Build playbooks for a website
  */
 export class PlaybookBuilder {
-  private config: Required<Omit<PlaybookBuilderConfig, 'llmProvider'>> & Pick<PlaybookBuilderConfig, 'llmProvider'>;
+  private config: Required<Omit<PlaybookBuilderConfig, 'llmProvider' | 'customPrompt'>> & Pick<PlaybookBuilderConfig, 'llmProvider' | 'customPrompt'>;
   private browser: BrowserAdapter;
   private ai: AIClient;
   private embedding: EmbeddingProvider | null = null;
@@ -50,6 +50,7 @@ export class PlaybookBuilder {
       maxDepth: config.maxDepth ?? 1,
       sourceVersionId: config.sourceVersionId ?? 0,
       llmProvider: config.llmProvider,
+      customPrompt: config.customPrompt,
     };
 
     // Auto-detect browser: AgentCoreBrowser in AWS, StagehandBrowser locally
@@ -73,10 +74,10 @@ export class PlaybookBuilder {
       log('warn', '[PlaybookBuilder] No OPENAI_API_KEY found, embedding generation disabled');
     }
 
-    // Initialize components
-    this.pageDiscoverer = new PageDiscoverer(this.ai);
-    this.pageAnalyzer = new PageAnalyzer(this.ai);
-    this.capabilitiesDiscoverer = new CapabilitiesDiscoverer(this.ai);
+    // Initialize components with optional custom prompt
+    this.pageDiscoverer = new PageDiscoverer(this.ai, this.config.customPrompt);
+    this.pageAnalyzer = new PageAnalyzer(this.ai, this.config.customPrompt);
+    this.capabilitiesDiscoverer = new CapabilitiesDiscoverer(this.ai, this.config.customPrompt);
   }
 
   /**

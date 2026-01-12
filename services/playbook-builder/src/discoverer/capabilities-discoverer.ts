@@ -139,9 +139,11 @@ const discoverCapabilitiesTool: OpenAI.Chat.Completions.ChatCompletionTool = {
  */
 export class CapabilitiesDiscoverer {
   private ai: AIClient;
+  private customPrompt?: string;
 
-  constructor(ai: AIClient) {
+  constructor(ai: AIClient, customPrompt?: string) {
     this.ai = ai;
+    this.customPrompt = customPrompt;
   }
 
   /**
@@ -152,6 +154,23 @@ export class CapabilitiesDiscoverer {
 
     // Extract key text for context
     const pageContext = this.extractPageContext(htmlContent);
+
+    // Build user prompt with optional custom instructions
+    let userText = `Analyze this page "${pageName}" and describe its capabilities from a user's perspective.
+
+Page context (key text extracted from HTML):
+${pageContext}
+
+Focus on:
+1. What can users DO on this page? (capabilities)
+2. What are the main functional areas?
+3. What are common user scenarios/workflows?
+4. Any prerequisites to use this page?
+
+Describe capabilities and scenarios in natural language - element details will be handled separately.`;
+    if (this.customPrompt) {
+      userText += `\n\n## Site-specific Instructions\n${this.customPrompt}`;
+    }
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: CAPABILITIES_SYSTEM_PROMPT },
@@ -166,18 +185,7 @@ export class CapabilitiesDiscoverer {
           },
           {
             type: 'text',
-            text: `Analyze this page "${pageName}" and describe its capabilities from a user's perspective.
-
-Page context (key text extracted from HTML):
-${pageContext}
-
-Focus on:
-1. What can users DO on this page? (capabilities)
-2. What are the main functional areas?
-3. What are common user scenarios/workflows?
-4. Any prerequisites to use this page?
-
-Describe capabilities and scenarios in natural language - element details will be handled separately.`,
+            text: userText,
           },
         ],
       },

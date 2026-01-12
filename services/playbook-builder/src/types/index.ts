@@ -24,6 +24,12 @@ export interface PlaybookBuilderConfig {
   sourceVersionId?: number;
   /** LLM provider for page exploration (auto-detected if not specified) */
   llmProvider?: 'openrouter' | 'openai' | 'anthropic' | 'bedrock';
+  /**
+   * Custom prompt for site-specific optimization
+   * Appended to user prompts in page discovery, analysis, and capabilities discovery
+   * Example: "Focus on the main navigation menu and ignore promotional banners"
+   */
+  customPrompt?: string;
 }
 
 /**
