@@ -69,6 +69,28 @@ You can start it with: pnpm dev
 
       expect(data.success).toBe(true);
     });
+
+    it('should truncate content field based on SEARCH_CONTENT_MAX_LENGTH', async () => {
+      const res = await fetch(`${BASE_URL}/api/actions/search?q=company&type=fulltext&limit=5`);
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+
+      expect(data.success).toBe(true);
+      expect(Array.isArray(data.results)).toBe(true);
+
+      // Check that all content fields are truncated to max length (default: 1000)
+      // Note: SEARCH_CONTENT_MAX_LENGTH env var defaults to 1000 if not set
+      const maxLength = parseInt(process.env.SEARCH_CONTENT_MAX_LENGTH || '1000', 10);
+
+      data.results.forEach((result: any) => {
+        expect(result.content).toBeDefined();
+        expect(typeof result.content).toBe('string');
+        expect(result.content.length).toBeLessThanOrEqual(maxLength);
+      });
+
+      console.log(`Content length check: all results <= ${maxLength} characters`);
+    });
   });
 
   describe('GET /api/actions?id=<url>', () => {
