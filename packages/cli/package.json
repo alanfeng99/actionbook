@@ -1,6 +1,6 @@
 {
   "name": "@actionbookdev/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI for Actionbook - Get website action manuals for AI agents",
   "private": false,
   "type": "module",
@@ -52,5 +52,5 @@
   },
   "homepage": "https://actionbook.dev",
   "author": "Actionbook Team",
-  "license": "MIT"
+  "license": "Apache-2.0"
 }
