@@ -15,6 +15,12 @@
       "source": "./playground/rust-learner",
       "description": "Learn Rust language features and crate updates using Actionbook + agent-browser.",
       "version": "0.1.0"
+    },
+    {
+      "name": "arxiv-viewer",
+      "source": "./playground/arxiv-viewer",
+      "description": "View, search, download, and read academic papers from arXiv. Supports API queries, web scraping via Actionbook, and HTML paper reading via ar5iv.",
+      "version": "0.1.0"
     }
   ]
 }

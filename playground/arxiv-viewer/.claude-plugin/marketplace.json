@@ -1,0 +1,15 @@
+{
+  "name": "arxiv-viewer",
+  "owner": {
+    "name": "Actionbook",
+    "url": "https://github.com/actionbook"
+  },
+  "plugins": [
+    {
+      "name": "arxiv-viewer",
+      "source": "./",
+      "description": "View, search, download, and read academic papers from arXiv. Supports API queries, web scraping via Actionbook, and HTML paper reading via ar5iv.",
+      "version": "0.1.0"
+    }
+  ]
+}
