@@ -1,0 +1,221 @@
+# arXiv & ar5iv Reference
+
+> LLM-friendly documentation for arXiv API and ar5iv HTML papers
+
+---
+
+## Part 1: arXiv API
+
+### API Endpoint
+
+Base URL: `http://export.arxiv.org/api/query`
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| search_query | string | - | Search terms with field prefixes |
+| id_list | string | - | Comma-separated arXiv IDs |
+| start | int | 0 | Result offset for pagination |
+| max_results | int | 10 | Max results (1-2000) |
+| sortBy | string | relevance | relevance / lastUpdatedDate / submittedDate |
+| sortOrder | string | descending | ascending / descending |
+
+### Search Field Prefixes
+
+| Prefix | Field | Example |
+|--------|-------|---------|
+| `ti:` | Title | `ti:transformer` |
+| `au:` | Author | `au:hinton` |
+| `abs:` | Abstract | `abs:attention` |
+| `cat:` | Category | `cat:cs.AI` |
+| `co:` | Comment | `co:pages` |
+| `jr:` | Journal Reference | `jr:nature` |
+| `all:` | All fields | `all:neural+network` |
+
+### Boolean Operators
+
+**MUST be uppercase:**
+- `AND` - Both terms required
+- `OR` - Either term
+- `ANDNOT` - First term but not second
+
+### Example API Calls
+
+```
+# Search by title
+http://export.arxiv.org/api/query?search_query=ti:transformer&max_results=10
+
+# Search by author
+http://export.arxiv.org/api/query?search_query=au:hinton&max_results=10
+
+# Combined search
+http://export.arxiv.org/api/query?search_query=ti:attention+AND+cat:cs.CL&max_results=10
+
+# Get by ID
+http://export.arxiv.org/api/query?id_list=2301.07041
+
+# Sorted by date
+http://export.arxiv.org/api/query?search_query=cat:cs.LG&sortBy=submittedDate&sortOrder=descending&max_results=20
+```
+
+### Response Format (Atom XML)
+
+Key elements per `<entry>`:
+- `<id>` - Paper URL
+- `<title>` - Paper title
+- `<summary>` - Abstract
+- `<author><name>` - Author names
+- `<published>` - Publication date
+- `<arxiv:primary_category term="">` - Primary category
+
+---
+
+## Part 2: ar5iv.org HTML Papers
+
+### Overview
+
+ar5iv.org converts arXiv LaTeX papers to accessible HTML5.
+
+### URL Patterns
+
+| Purpose | URL |
+|---------|-----|
+| HTML paper | `https://ar5iv.org/html/{arxiv_id}` |
+| Abstract page | `https://ar5iv.org/abs/{arxiv_id}` |
+
+### HTML Structure & Selectors
+
+#### Document Structure
+```html
+<article class="ltx_document">
+  <div class="ltx_title">Paper Title</div>
+  <div class="ltx_authors">Authors...</div>
+  <div class="ltx_abstract">Abstract text...</div>
+
+  <section id="S1" class="ltx_section">
+    <h2 class="ltx_title">1 Introduction</h2>
+    <div class="ltx_para">...</div>
+  </section>
+
+  <section id="S2" class="ltx_section">
+    <h2 class="ltx_title">2 Methods</h2>
+    ...
+  </section>
+</article>
+```
+
+#### Key Selectors
+
+| Element | CSS Selector | Description |
+|---------|--------------|-------------|
+| Title | `.ltx_title` (first) | Paper title |
+| Authors | `.ltx_authors` | Author list |
+| Abstract | `.ltx_abstract` | Abstract content |
+| All sections | `section.ltx_section` | Main sections |
+| Section by ID | `#S1`, `#S2`, etc. | Specific section |
+| Section title | `h2.ltx_title` | Section heading |
+| Subsection | `section.ltx_subsection` | Subsections |
+| Paragraphs | `.ltx_para` | Paragraph content |
+| Figures | `figure.ltx_figure` | Figure containers |
+| Figure image | `figure.ltx_figure img` | Figure images |
+| Figure caption | `figcaption.ltx_caption` | Figure captions |
+| Tables | `table.ltx_tabular` | Data tables |
+| Equations | `.ltx_equation` | Math equations |
+| Inline math | `.ltx_Math` | Inline math |
+| Bibliography | `.ltx_bibliography` | Reference section |
+| Single citation | `.ltx_bibitem` | Individual reference |
+| Footnotes | `.ltx_note` | Footnote content |
+
+#### Common Section IDs
+
+| ID | Typical Content |
+|----|-----------------|
+| `#S1` | Introduction |
+| `#S2` | Related Work / Background |
+| `#S3` | Methods / Approach |
+| `#S4` | Experiments / Results |
+| `#S5` | Discussion |
+| `#S6` | Conclusion |
+| `#bib` | Bibliography |
+
+### Extraction Examples
+
+```
+# Get paper title
+agent-browser get text ".ltx_document > .ltx_title"
+
+# Get abstract
+agent-browser get text ".ltx_abstract"
+
+# Get specific section (e.g., Methods)
+agent-browser get text "#S3"
+
+# Get all section titles (outline)
+agent-browser get text "h2.ltx_title"
+
+# Get all figure captions
+agent-browser get text "figcaption.ltx_caption"
+
+# Get bibliography
+agent-browser get text ".ltx_bibliography"
+```
+
+### Availability Check
+
+Not all arXiv papers have ar5iv versions. Check availability:
+- Visit `https://ar5iv.org/abs/{id}`
+- If page loads with content → HTML available
+- If error page → No HTML version
+
+---
+
+## Part 3: URL Patterns Summary
+
+| Purpose | URL |
+|---------|-----|
+| arXiv Abstract | `https://arxiv.org/abs/{id}` |
+| arXiv PDF | `https://arxiv.org/pdf/{id}.pdf` |
+| arXiv API by ID | `http://export.arxiv.org/api/query?id_list={id}` |
+| arXiv API search | `http://export.arxiv.org/api/query?search_query={query}` |
+| arXiv Latest | `https://arxiv.org/list/{category}/recent` |
+| arXiv Advanced Search | `https://arxiv.org/search/advanced` |
+| ar5iv HTML | `https://ar5iv.org/html/{id}` |
+| ar5iv Abstract | `https://ar5iv.org/abs/{id}` |
+
+## Part 4: arXiv ID Formats
+
+| Format | Pattern | Example |
+|--------|---------|---------|
+| New (2007+) | YYMM.NNNNN | 2301.07041 |
+| New with version | YYMM.NNNNNvN | 2301.07041v2 |
+| Old | category/YYNNNNN | cs.AI/0612345 |
+
+## Part 5: Common Categories
+
+### Computer Science (cs.*)
+- `cs.AI` - Artificial Intelligence
+- `cs.CL` - Computation and Language (NLP)
+- `cs.CV` - Computer Vision
+- `cs.LG` - Machine Learning
+- `cs.NE` - Neural and Evolutionary Computing
+- `cs.RO` - Robotics
+- `cs.SE` - Software Engineering
+
+### Statistics (stat.*)
+- `stat.ML` - Machine Learning
+
+### Mathematics (math.*)
+- `math.OC` - Optimization and Control
+
+### Physics
+- `quant-ph` - Quantum Physics
+- `cond-mat.stat-mech` - Statistical Mechanics
+
+---
+
+## Part 6: Rate Limiting
+
+- arXiv API: 3 second delay between requests
+- ar5iv.org: Respect server load, avoid rapid requests
+- Be respectful of free academic services

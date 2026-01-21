@@ -1,0 +1,19 @@
+# Documentation (local only)
+.docs/
+
+# Generated files
+*.pdf
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
