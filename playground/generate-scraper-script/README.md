@@ -6,6 +6,8 @@ This demo shows how **Actionbook** helps AI Agents (like Claude Code) generate m
 
 Watch how Actionbook helps Claude Code write a correct scraper, 10x faster.
 
+https://github.com/user-attachments/assets/912b7d39-1e55-43b7-b766-344b242762e9
+
 ## The Problem
 
 When you ask Claude Code to "write a scraper for X website", it needs to figure out:
