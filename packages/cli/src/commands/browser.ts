@@ -17,7 +17,7 @@ Examples:
   $ actionbook browser fill @e3 "test@example.com"
 
 Setup:
-  $ actionbook browser install          # Install agent-browser and Chromium
+  $ actionbook browser install          # Download Chromium browser
   $ actionbook browser install --with-deps  # Linux: include system dependencies
 
 For detailed agent-browser commands:

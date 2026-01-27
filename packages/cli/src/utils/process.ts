@@ -62,77 +62,12 @@ export function showAgentBrowserInstallation(): void {
 }
 
 /**
- * Show installation instructions for agent-browser setup (including Chromium)
- */
-export function showAgentBrowserSetupInstructions(): void {
-  console.error(chalk.yellow('\nTo use browser automation, you need to:\n'))
-
-  console.error(chalk.white('1. Install agent-browser (recommended):\n'))
-  console.error(chalk.cyan('   npm install -g agent-browser\n'))
-
-  console.error(chalk.white('2. Download Chromium:\n'))
-  console.error(chalk.cyan('   agent-browser install\n'))
-
-  console.error(chalk.white('Linux users - install system dependencies:\n'))
-  console.error(chalk.cyan('   agent-browser install --with-deps\n'))
-
-  console.error(chalk.white('Learn more: ') + chalk.cyan('https://github.com/vercel-labs/agent-browser\n'))
-}
-
-/**
- * Check if agent-browser is installed
- */
-function checkAgentBrowserInstalled(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const child = spawn('agent-browser', ['--version'], {
-      stdio: 'pipe',
-      shell: false,
-      env: process.env,
-    })
-
-    child.on('close', (code) => {
-      resolve(code === 0)
-    })
-
-    child.on('error', (error: NodeJS.ErrnoException) => {
-      // Command not found
-      if (error.code === 'ENOENT') {
-        resolve(false)
-      } else {
-        resolve(false)
-      }
-    })
-  })
-}
-
-/**
- * Install agent-browser and setup Chromium
+ * Install Chromium browser binaries for agent-browser
  * @param installArgs - Additional arguments for agent-browser install (e.g., ['--with-deps'])
  */
 export async function installAgentBrowser(installArgs: string[] = []): Promise<number> {
   console.log(chalk.cyan('Setting up browser automation...\n'))
-
-  // Check if agent-browser is already installed
-  const isInstalled = await checkAgentBrowserInstalled()
-
-  if (!isInstalled) {
-    console.log(chalk.yellow('Step 1/2: Installing agent-browser via npm...\n'))
-
-    const npmExitCode = await spawnCommand('npm', ['install', '-g', 'agent-browser'])
-
-    if (npmExitCode !== 0) {
-      console.error(chalk.red('\nFailed to install agent-browser via npm.'))
-      console.error(chalk.white('Please check your npm installation and try again.\n'))
-      return npmExitCode
-    }
-
-    console.log(chalk.green('\n✓ agent-browser installed successfully\n'))
-  } else {
-    console.log(chalk.green('✓ agent-browser is already installed\n'))
-  }
-
-  // Run agent-browser install to download Chromium
-  console.log(chalk.yellow(`Step 2/2: Downloading Chromium browser binaries...\n`))
+  console.log(chalk.yellow('Downloading Chromium browser binaries...\n'))
 
   const installCommand = ['install', ...installArgs]
   const exitCode = await spawnCommand('agent-browser', installCommand)

@@ -120,17 +120,14 @@ actionbook browser close
 **Setup:**
 
 ```bash
-# Automatic setup (recommended) - installs agent-browser and Chromium
+# npm (recommended)
+# Download Chromium
 actionbook browser install
 
 # Linux users - include system dependencies
 actionbook browser install --with-deps
+# or manually: npx playwright install-deps chromium
 ```
-
-This will automatically:
-1. Install agent-browser via npm if not already installed
-2. Download Chromium browser binaries
-3. Install system dependencies (Linux with --with-deps flag)
 
 **Common Commands:**
 - `open <url>` - Navigate to URL
