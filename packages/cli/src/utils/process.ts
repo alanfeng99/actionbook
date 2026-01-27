@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import chalk from 'chalk'
 
 /**
@@ -45,6 +47,44 @@ export async function spawnCommand(
 }
 
 /**
+ * Spawn agent-browser command using npx from CLI package directory
+ * This ensures agent-browser is executed from the CLI's node_modules
+ */
+export async function spawnAgentBrowser(args: string[]): Promise<number> {
+  return new Promise((resolve) => {
+    // Get CLI package root directory (dist/utils/process.js -> ../..)
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const cliPackageRoot = join(__dirname, '..', '..')
+
+    const child = spawn('npx', ['agent-browser', ...args], {
+      stdio: 'inherit',
+      shell: false,
+      env: process.env,
+      cwd: cliPackageRoot, // Execute in CLI package directory
+    })
+
+    child.on('close', (code, signal) => {
+      if (signal) {
+        resolve(128 + (signal === 'SIGINT' ? 2 : 15))
+      } else {
+        resolve(code ?? 1)
+      }
+    })
+
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        console.error(chalk.red('\nnpx command not found.'))
+        console.error(chalk.white('Please ensure npm 5.2+ is installed.\n'))
+        resolve(127)
+      } else {
+        console.error(chalk.red(`Failed to execute agent-browser: ${error.message}`))
+        resolve(1)
+      }
+    })
+  })
+}
+
+/**
  * Show installation instructions for agent-browser
  */
 export function showAgentBrowserInstallation(): void {
@@ -63,14 +103,51 @@ export function showAgentBrowserInstallation(): void {
 
 /**
  * Install Chromium browser binaries for agent-browser
- * @param installArgs - Additional arguments for agent-browser install (e.g., ['--with-deps'])
+ * @param installArgs - Additional arguments like ['--with-deps'] for Linux
  */
 export async function installAgentBrowser(installArgs: string[] = []): Promise<number> {
   console.log(chalk.cyan('Setting up browser automation...\n'))
   console.log(chalk.yellow('Downloading Chromium browser binaries...\n'))
 
-  const installCommand = ['install', ...installArgs]
-  const exitCode = await spawnCommand('agent-browser', installCommand)
+  // Get CLI package root directory to run npx from there
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  const cliPackageRoot = join(__dirname, '..', '..')
+
+  // Use npx playwright install chromium (the official way)
+  const playwrightArgs = ['playwright', 'install', 'chromium']
+
+  // Add --with-deps if requested (Linux only)
+  if (installArgs.includes('--with-deps')) {
+    playwrightArgs.push('--with-deps')
+  }
+
+  const exitCode = await new Promise<number>((resolve) => {
+    const child = spawn('npx', playwrightArgs, {
+      stdio: 'inherit',
+      shell: false,
+      env: process.env,
+      cwd: cliPackageRoot,
+    })
+
+    child.on('close', (code, signal) => {
+      if (signal) {
+        resolve(128 + (signal === 'SIGINT' ? 2 : 15))
+      } else {
+        resolve(code ?? 1)
+      }
+    })
+
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        console.error(chalk.red('\nnpx command not found.'))
+        console.error(chalk.white('Please ensure npm 5.2+ is installed.\n'))
+        resolve(127)
+      } else {
+        console.error(chalk.red(`Failed to install Chromium: ${error.message}`))
+        resolve(1)
+      }
+    })
+  })
 
   if (exitCode === 0) {
     console.log(chalk.green('\n✓ Browser automation setup complete!\n'))
