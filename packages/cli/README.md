@@ -117,12 +117,29 @@ actionbook browser session
 actionbook browser close
 ```
 
-**Prerequisites:**
-
-Install `agent-browser` globally:
+**Setup:**
 
 ```bash
+# Install agent-browser and setup Chromium
+actionbook browser install
+```
+
+This will guide you through:
+1. Installing agent-browser via npm (recommended)
+2. Downloading Chromium browser binaries
+3. Installing system dependencies (Linux only)
+
+Or install manually:
+
+```bash
+# 1. Install agent-browser
 npm install -g agent-browser
+
+# 2. Download Chromium
+agent-browser install
+
+# 3. Linux only - install system dependencies
+agent-browser install --with-deps
 ```
 
 **Common Commands:**

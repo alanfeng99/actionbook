@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import chalk from 'chalk'
-import { spawnCommand } from '../utils/process.js'
+import { spawnCommand, showAgentBrowserSetupInstructions } from '../utils/process.js'
 
 export const browserCommand = new Command('browser')
   .description('Execute agent-browser commands (browser automation)')
@@ -16,6 +16,9 @@ Examples:
   $ actionbook browser click @e1
   $ actionbook browser fill @e3 "test@example.com"
 
+Setup:
+  $ actionbook browser install  # Setup agent-browser and Chromium
+
 For detailed agent-browser commands:
   $ agent-browser --help
 
@@ -30,6 +33,18 @@ Learn more: ${chalk.cyan('https://github.com/vercel-labs/agent-browser')}
     if (args.length === 0) {
       console.log(chalk.yellow('No arguments provided. Showing agent-browser help:\n'))
       const exitCode = await spawnCommand('agent-browser', ['--help'])
+      process.exit(exitCode)
+      return
+    }
+
+    // Special handling for 'install' command - show setup instructions on error
+    if (args[0] === 'install') {
+      const exitCode = await spawnCommand('agent-browser', args, true)
+      if (exitCode === 127) {
+        // Command not found - show setup instructions
+        showAgentBrowserSetupInstructions()
+        process.exit(1)
+      }
       process.exit(exitCode)
       return
     }
