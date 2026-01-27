@@ -78,3 +78,72 @@ export function showAgentBrowserSetupInstructions(): void {
 
   console.error(chalk.white('Learn more: ') + chalk.cyan('https://github.com/vercel-labs/agent-browser\n'))
 }
+
+/**
+ * Check if agent-browser is installed
+ */
+function checkAgentBrowserInstalled(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn('agent-browser', ['--version'], {
+      stdio: 'pipe',
+      shell: false,
+      env: process.env,
+    })
+
+    child.on('close', (code) => {
+      resolve(code === 0)
+    })
+
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      // Command not found
+      if (error.code === 'ENOENT') {
+        resolve(false)
+      } else {
+        resolve(false)
+      }
+    })
+  })
+}
+
+/**
+ * Install agent-browser and setup Chromium
+ * @param installArgs - Additional arguments for agent-browser install (e.g., ['--with-deps'])
+ */
+export async function installAgentBrowser(installArgs: string[] = []): Promise<number> {
+  console.log(chalk.cyan('Setting up browser automation...\n'))
+
+  // Check if agent-browser is already installed
+  const isInstalled = await checkAgentBrowserInstalled()
+
+  if (!isInstalled) {
+    console.log(chalk.yellow('Step 1/2: Installing agent-browser via npm...\n'))
+
+    const npmExitCode = await spawnCommand('npm', ['install', '-g', 'agent-browser'])
+
+    if (npmExitCode !== 0) {
+      console.error(chalk.red('\nFailed to install agent-browser via npm.'))
+      console.error(chalk.white('Please check your npm installation and try again.\n'))
+      return npmExitCode
+    }
+
+    console.log(chalk.green('\n✓ agent-browser installed successfully\n'))
+  } else {
+    console.log(chalk.green('✓ agent-browser is already installed\n'))
+  }
+
+  // Run agent-browser install to download Chromium
+  console.log(chalk.yellow(`Step 2/2: Downloading Chromium browser binaries...\n`))
+
+  const installCommand = ['install', ...installArgs]
+  const exitCode = await spawnCommand('agent-browser', installCommand)
+
+  if (exitCode === 0) {
+    console.log(chalk.green('\n✓ Browser automation setup complete!\n'))
+    console.log(chalk.white('You can now use: ') + chalk.cyan('actionbook browser <command>\n'))
+  } else {
+    console.error(chalk.red('\nBrowser setup encountered an error.'))
+    console.error(chalk.white('Please check the output above for details.\n'))
+  }
+
+  return exitCode
+}

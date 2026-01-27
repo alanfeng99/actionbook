@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import chalk from 'chalk'
-import { spawnCommand, showAgentBrowserSetupInstructions } from '../utils/process.js'
+import { spawnCommand, installAgentBrowser } from '../utils/process.js'
 
 export const browserCommand = new Command('browser')
   .description('Execute agent-browser commands (browser automation)')
@@ -17,7 +17,8 @@ Examples:
   $ actionbook browser fill @e3 "test@example.com"
 
 Setup:
-  $ actionbook browser install  # Setup agent-browser and Chromium
+  $ actionbook browser install          # Install agent-browser and Chromium
+  $ actionbook browser install --with-deps  # Linux: include system dependencies
 
 For detailed agent-browser commands:
   $ agent-browser --help
@@ -37,14 +38,9 @@ Learn more: ${chalk.cyan('https://github.com/vercel-labs/agent-browser')}
       return
     }
 
-    // Special handling for 'install' command - show setup instructions on error
+    // Special handling for 'install' command - auto-install agent-browser if needed
     if (args[0] === 'install') {
-      const exitCode = await spawnCommand('agent-browser', args, true)
-      if (exitCode === 127) {
-        // Command not found - show setup instructions
-        showAgentBrowserSetupInstructions()
-        process.exit(1)
-      }
+      const exitCode = await installAgentBrowser(args.slice(1))
       process.exit(exitCode)
       return
     }
