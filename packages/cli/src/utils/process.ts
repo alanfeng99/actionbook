@@ -49,6 +49,7 @@ export async function spawnCommand(
 /**
  * Spawn agent-browser command using npx from CLI package directory
  * This ensures agent-browser is executed from the CLI's node_modules
+ * Replaces "agent-browser" with "actionbook browser" in output
  */
 export async function spawnAgentBrowser(args: string[]): Promise<number> {
   return new Promise((resolve) => {
@@ -57,11 +58,27 @@ export async function spawnAgentBrowser(args: string[]): Promise<number> {
     const cliPackageRoot = join(__dirname, '..', '..')
 
     const child = spawn('npx', ['agent-browser', ...args], {
-      stdio: 'inherit',
+      stdio: ['inherit', 'pipe', 'pipe'], // Inherit stdin, pipe stdout/stderr for transformation
       shell: false,
       env: process.env,
       cwd: cliPackageRoot, // Execute in CLI package directory
     })
+
+    // Transform and output stdout
+    if (child.stdout) {
+      child.stdout.on('data', (data: Buffer) => {
+        const output = data.toString().replace(/agent-browser/g, 'actionbook browser')
+        process.stdout.write(output)
+      })
+    }
+
+    // Transform and output stderr
+    if (child.stderr) {
+      child.stderr.on('data', (data: Buffer) => {
+        const output = data.toString().replace(/agent-browser/g, 'actionbook browser')
+        process.stderr.write(output)
+      })
+    }
 
     child.on('close', (code, signal) => {
       if (signal) {
