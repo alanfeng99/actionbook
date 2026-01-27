@@ -48,7 +48,7 @@ Actionbook places up-to-date action manuals with the relevant DOM selectors dire
 
 See how Actionbook enables an agent to complete an Airbnb search task 10x faster.
 
-https://github.com/user-attachments/assets/c621373e-98e7-451a-bf5c-6adbea23e3b8
+https://github.com/user-attachments/assets/9f896fe7-296a-44b3-8592-931a099612de
 
 ## Quick Start
 
