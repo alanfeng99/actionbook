@@ -24,46 +24,55 @@ Activate this skill when the user:
 
 ```bash
 # Step 1: Search for action manuals
-actionbook search "arxiv search papers"
-# Returns: action IDs with scores
+actionbook search "<task-description>"
+# Options: -d/--domain to filter by domain, -u/--url to filter by URL
+# Returns: area IDs with scores
 
 # Step 2: Get the full manual
-actionbook get "https://arxiv.org/search/advanced"
+actionbook get "<area-id>"
 # Returns: Page structure, UI Elements with CSS/XPath selectors
+# Example: actionbook get "airbnb.com:/:default"
 ```
 
 **Phase 2: Execute with Browser**
 
 ```bash
-# Step 3: Open browser
-actionbook browser open "https://arxiv.org/search/advanced"
-actionbook browser wait --load networkidle
+# Step 3: Open browser and wait for page load
+actionbook browser open "<URL>"
+actionbook browser wait-nav
 
 # Step 4: Use CSS selectors from Action Manual directly
-actionbook browser fill "#terms-0-term" "Neural Network"
-actionbook browser select "#terms-0-field" "title"
-actionbook browser click "#date-filter_by-2"
-actionbook browser fill "#date-year" "2025"
-actionbook browser click "form[action='/search/advanced'] button.is-link"
+actionbook browser fill "<input-selector>" "<value>"
+actionbook browser select "<dropdown-selector>" "<option>"
+actionbook browser click "<button-selector>"
 
-# Step 5: Wait for results
-actionbook browser wait --load networkidle
+# Step 5: Wait for results (element or navigation)
+actionbook browser wait "<selector>"        # Wait for element
+actionbook browser wait-nav                 # Wait for navigation
 
-# Step 6: Extract data (snapshot only when needed for data extraction)
+# Step 6: Navigate to another page (if needed)
+actionbook browser goto "<new-URL>"         # Navigate in current tab
+actionbook browser wait-nav
+
+# Step 7: Extract data (snapshot only when needed for data extraction)
 actionbook browser snapshot
 
-# Step 7: Close browser
+# Step 8: Close browser
 actionbook browser close
 ```
+
+> **Notes:**
+> - Replace `<selector>` placeholders with actual CSS selectors from the Action Manual output.
+> - `open` opens URL in a new tab; `goto` navigates in the current tab.
 
 ### Method 2: MCP Server
 
 ```typescript
 // Step 1: Search
-search_actions({ query: "arxiv search papers" })
+search_actions({ query: "<task-description>" })
 
 // Step 2: Get manual
-get_action_by_id({ actionId: "https://arxiv.org/search/advanced" })
+get_action_by_id({ areaId: "<area-id>" })
 ```
 
 ## Action Manual Format
@@ -86,20 +95,20 @@ UI Elements:
 
 | Category | Commands |
 |----------|----------|
-| Navigation | `open <url>`, `back`, `forward`, `reload`, `close` |
-| Snapshot | `snapshot`, `snapshot -i` (interactive only) |
-| Interaction | `click`, `fill`, `type`, `select`, `check`, `press` |
-| Wait | `wait <ms>`, `wait --load networkidle`, `wait --text "..."` |
-| Info | `get text @ref`, `get url`, `get value @ref` |
-| Capture | `screenshot`, `screenshot --full`, `pdf` |
+| Navigation | `open <url>`, `goto <url>`, `back`, `forward`, `reload`, `close` |
+| Interaction | `click <selector>`, `fill <selector> <text>`, `type <selector> <text>`, `select <selector> <value>`, `hover <selector>`, `focus <selector>`, `press <key>` |
+| Wait | `wait <selector>`, `wait-nav` |
+| Info | `text [selector]`, `html`, `snapshot` |
+| Capture | `screenshot [path]`, `screenshot --full-page`, `pdf <path>` |
+| Advanced | `pages`, `switch <id>`, `cookies`, `eval <js>`, `viewport`, `inspect` |
 
 ## Guidelines
 
 - Search by task description, not element name ("arxiv search papers" not "search button")
 - **Use Action Manual selectors first** - they are pre-verified and don't require snapshot
 - Prefer CSS ID selectors (`#id`) over XPath when both are provided
-- **Fallback to snapshot only when selectors fail** - use `snapshot -i` then @refs
-- Re-snapshot after navigation - DOM changes invalidate @refs
+- **Fallback to snapshot only when selectors fail** - use `snapshot` for accessibility tree
+- Re-snapshot after navigation - DOM changes invalidate previous snapshot data
 
 ## Fallback Strategy
 
@@ -118,13 +127,3 @@ These conditions are not signaled in Actionbook API responses. They can only be 
 ### Fallback Approaches
 
 When Actionbook data does not work as expected, direct browser access to the target website allows for real-time retrieval of current page structure, element information, and interaction capabilities.
-
-## Advanced Features
-
-For complete command reference and advanced features, see:
-- [references/command-reference.md](references/command-reference.md) - All commands
-- [references/authentication.md](references/authentication.md) - Login flows, OAuth, 2FA
-- [references/session-management.md](references/session-management.md) - Parallel sessions
-- [references/snapshot-refs.md](references/snapshot-refs.md) - Ref lifecycle
-- [references/video-recording.md](references/video-recording.md) - Recording workflows
-- [references/proxy-support.md](references/proxy-support.md) - Proxy configuration
