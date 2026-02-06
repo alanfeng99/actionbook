@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
@@ -578,6 +579,11 @@ async fn screenshot(cli: &Cli, config: &Config, path: &str, full_page: bool) -> 
             .await?
     };
 
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     fs::write(path, screenshot_data)?;
 
     if cli.json {
@@ -603,6 +609,11 @@ async fn pdf(cli: &Cli, config: &Config, path: &str) -> Result<()> {
         .pdf_page(cli.profile.as_deref())
         .await?;
 
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     fs::write(path, pdf_data)?;
 
     if cli.json {
