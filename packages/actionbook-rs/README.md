@@ -224,7 +224,7 @@ actionbook config show
 actionbook config path
 
 # Set a config value
-actionbook config set api_url "https://api.actionbook.dev"
+actionbook config set api.base_url "https://api.actionbook.dev"
 ```
 
 ### 5. Profile Management
@@ -252,16 +252,19 @@ actionbook --profile work browser open "https://example.com"
 
 ```toml
 # API configuration
-api_url = "https://api.actionbook.dev"
+[api]
+base_url = "https://api.actionbook.dev"
+api_key = "your-api-key"  # optional
 
 # Browser settings
 [browser]
 headless = false
-cdp_port = 9222
+default_profile = "default"
 
-# Default profile
-[profile.default]
-browser_type = "chrome"
+# Profiles
+[profiles.default]
+browser_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+headless = false
 ```
 
 ### Environment Variables
@@ -269,9 +272,9 @@ browser_type = "chrome"
 All config values can be overridden via environment variables:
 
 ```bash
-ACTIONBOOK_API_URL=https://api.actionbook.dev
-ACTIONBOOK_HEADLESS=true
-ACTIONBOOK_CDP_PORT=9222
+ACTIONBOOK_API_BASE_URL=https://api.actionbook.dev
+ACTIONBOOK_API_API_KEY=your-api-key
+ACTIONBOOK_BROWSER_HEADLESS=true
 ```
 
 ### Configuration Priority
