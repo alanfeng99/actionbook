@@ -88,19 +88,19 @@ Actionbook provides three integration methods:
 - **MCP Server**: For AI IDEs like Cursor and Claude.
 - **JavaScript SDK**: For custom programmatic integration.
 
-For detailed installation instructions, please visit the [Installation Guide](https://actionbook.dev/guides/installation).
+For detailed installation instructions, please visit the [Installation Guide](https://actionbook.dev/docs/guides/installation).
 
 
 ## Examples
 
-Explore real-world examples in the [Examples Documentation](https://actionbook.dev/examples).
+Explore real-world examples in the [Examples Documentation](https://actionbook.dev/docs/examples).
 
 
 ## Available Tools
 
 Actionbook provides tools for searching and retrieving action manuals.
 
-Check out the [CLI Reference](https://actionbook.dev/api-reference/cli) and [MCP Tools Reference](https://actionbook.dev/api-reference/mcp-tools).
+Check out the [CLI Reference](https://actionbook.dev/docs/api-reference/cli) and [MCP Tools Reference](https://actionbook.dev/docs/api-reference/mcp-tools).
 
 
 ## Stay tuned
