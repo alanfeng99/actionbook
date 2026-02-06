@@ -102,7 +102,7 @@ function resolvePackageDir(packageName) {
   } catch {
     // Fallback for workspace or non-hoisted layouts.
     const unscoped = packageName.split("/")[1];
-    const packageDir = path.join(__dirname, "..", "..", "..", unscoped);
+    const packageDir = path.join(__dirname, "..", "..", unscoped);
     const packageJsonPath = path.join(packageDir, "package.json");
     if (existsSync(packageJsonPath)) {
       return packageDir;

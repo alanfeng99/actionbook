@@ -44,7 +44,7 @@ function resolvePackageDir(packageName) {
     return path.dirname(packageJsonPath);
   } catch {
     const unscoped = packageName.split("/")[1];
-    const packageDir = path.join(__dirname, "..", "..", "..", unscoped);
+    const packageDir = path.join(__dirname, "..", "..", unscoped);
     const packageJsonPath = path.join(packageDir, "package.json");
     if (fs.existsSync(packageJsonPath)) {
       return packageDir;
