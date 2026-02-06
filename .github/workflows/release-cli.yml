@@ -16,23 +16,23 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            npm-suffix: darwin-arm64
+            platform-suffix: darwin-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            npm-suffix: darwin-x64
+            platform-suffix: darwin-x64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            npm-suffix: linux-x64
+            platform-suffix: linux-x64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            npm-suffix: linux-arm64
+            platform-suffix: linux-arm64
             use-cross: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            npm-suffix: win32-x64
+            platform-suffix: win32-x64
           - target: aarch64-pc-windows-msvc
             os: windows-latest
-            npm-suffix: win32-arm64
+            platform-suffix: win32-arm64
 
     runs-on: ${{ matrix.os }}
     defaults:
@@ -73,10 +73,13 @@ jobs:
         shell: bash
         run: |
           SRC="target/${{ matrix.target }}/release/${{ steps.binary.outputs.name }}"
-          if [[ "${{ matrix.npm-suffix }}" == win32-* ]]; then
-            DEST="actionbook-${{ matrix.npm-suffix }}.exe"
+          ARTIFACT_DIR="${RUNNER_TEMP}/actionbook-binaries"
+          mkdir -p "$ARTIFACT_DIR"
+
+          if [[ "${{ matrix.platform-suffix }}" == win32-* ]]; then
+            DEST="$ARTIFACT_DIR/actionbook-${{ matrix.platform-suffix }}.exe"
           else
-            DEST="actionbook-${{ matrix.npm-suffix }}"
+            DEST="$ARTIFACT_DIR/actionbook-${{ matrix.platform-suffix }}"
           fi
           cp "$SRC" "$DEST"
           chmod +x "$DEST"
@@ -84,8 +87,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: actionbook-${{ matrix.npm-suffix }}
-          path: packages/actionbook-rs/actionbook-${{ matrix.npm-suffix }}*
+          name: actionbook-${{ matrix.platform-suffix }}
+          path: ${{ runner.temp }}/actionbook-binaries/actionbook-${{ matrix.platform-suffix }}*
           if-no-files-found: error
 
   publish:
