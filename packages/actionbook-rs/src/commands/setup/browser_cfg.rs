@@ -228,6 +228,10 @@ mod tests {
             cdp: None,
             profile: None,
             headless: false,
+            stealth: false,
+            stealth_os: None,
+            stealth_gpu: None,
+            api_key: None,
             json: false,
             verbose: false,
             command: crate::cli::Commands::Config {
@@ -250,6 +254,10 @@ mod tests {
             cdp: None,
             profile: None,
             headless: false,
+            stealth: false,
+            stealth_os: None,
+            stealth_gpu: None,
+            api_key: None,
             json: false,
             verbose: false,
             command: crate::cli::Commands::Config {
@@ -270,6 +278,10 @@ mod tests {
             cdp: None,
             profile: None,
             headless: false,
+            stealth: false,
+            stealth_os: None,
+            stealth_gpu: None,
+            api_key: None,
             json: false,
             verbose: false,
             command: crate::cli::Commands::Config {
