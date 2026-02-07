@@ -694,7 +694,20 @@ impl SessionManager {
             .and_then(|v| v.as_f64())
             .ok_or_else(|| ActionbookError::Other("Invalid coordinates".to_string()))?;
 
-        // Send mouse click events
+        // Move mouse to target first so the browser updates its hit-test target,
+        // then press and release. Without mouseMoved, CDP may not dispatch the
+        // click to the correct DOM element.
+        self.send_cdp_command(
+            profile_name,
+            "Input.dispatchMouseEvent",
+            serde_json::json!({
+                "type": "mouseMoved",
+                "x": x,
+                "y": y
+            }),
+        )
+        .await?;
+
         self.send_cdp_command(
             profile_name,
             "Input.dispatchMouseEvent",
