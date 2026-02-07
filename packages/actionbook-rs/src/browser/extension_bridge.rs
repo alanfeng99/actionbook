@@ -334,9 +334,10 @@ async fn handle_cli_client(
     }
 }
 
-/// Check if the bridge server is running on the given port
+/// Check if the bridge server is running on the given port.
+/// Uses a plain TCP connect to avoid leaving orphan WebSocket connections on the bridge.
 pub async fn is_bridge_running(port: u16) -> bool {
-    use tokio_tungstenite::connect_async;
-    let url = format!("ws://127.0.0.1:{}", port);
-    connect_async(&url).await.is_ok()
+    tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .is_ok()
 }

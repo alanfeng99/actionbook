@@ -16,16 +16,7 @@ use crate::cli::{BrowserCommands, Cli, CookiesCommands};
 use crate::config::Config;
 use crate::error::{ActionbookError, Result};
 
-/// Send a CDP command through the extension bridge
-async fn extension_send_cdp(
-    cli: &Cli,
-    method: &str,
-    params: serde_json::Value,
-) -> Result<serde_json::Value> {
-    extension_bridge::send_command(cli.extension_port, method, params).await
-}
-
-/// Send an Extension.* command through the bridge
+/// Send a command (CDP or Extension.*) through the extension bridge
 async fn extension_send(
     cli: &Cli,
     method: &str,
@@ -775,7 +766,7 @@ async fn pdf(cli: &Cli, config: &Config, path: &str) -> Result<()> {
 
 async fn eval(cli: &Cli, config: &Config, code: &str) -> Result<()> {
     let value = if cli.extension {
-        let result = extension_send_cdp(
+        let result = extension_send(
             cli,
             "Runtime.evaluate",
             serde_json::json!({
