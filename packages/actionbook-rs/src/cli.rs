@@ -398,6 +398,19 @@ pub enum ExtensionCommands {
         #[arg(long, default_value = "19222")]
         port: u16,
     },
+
+    /// Install the embedded Chrome extension to config directory
+    Install {
+        /// Force reinstall even if already installed at same version
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Print the extension install directory path
+    Path,
+
+    /// Remove the installed extension
+    Uninstall,
 }
 
 #[derive(Subcommand)]

@@ -1,4 +1,5 @@
 mod discovery;
+pub mod embedded_extension;
 pub mod extension_bridge;
 mod launcher;
 mod session;
