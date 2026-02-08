@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use base64::Engine;
 use colored::Colorize;
 use futures::StreamExt;
 use tokio::time::timeout;
@@ -23,6 +24,97 @@ async fn extension_send(
     params: serde_json::Value,
 ) -> Result<serde_json::Value> {
     extension_bridge::send_command(cli.extension_port, method, params).await
+}
+
+/// Evaluate JS via the extension bridge and return the result value
+async fn extension_eval(cli: &Cli, expression: &str) -> Result<serde_json::Value> {
+    let result = extension_send(
+        cli,
+        "Runtime.evaluate",
+        serde_json::json!({
+            "expression": expression,
+            "returnByValue": true,
+        }),
+    )
+    .await?;
+
+    // Check for exception
+    if let Some(exception) = result.get("exceptionDetails") {
+        let msg = exception
+            .get("text")
+            .or_else(|| exception.get("exception").and_then(|e| e.get("description")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("JavaScript exception");
+        return Err(ActionbookError::ExtensionError(format!(
+            "JS error (extension mode): {}",
+            msg
+        )));
+    }
+
+    Ok(result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .cloned()
+        .unwrap_or_else(|| {
+            result
+                .get("result")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        }))
+}
+
+/// JavaScript helper that resolves a selector (CSS or [ref=eN] format) and returns the element.
+/// This is injected as a prefix for extension-mode commands that operate on selectors.
+fn js_resolve_selector(selector: &str) -> String {
+    format!(
+        r#"(function(selector) {{
+    if (/^\[ref=e\d+\]$/.test(selector)) {{
+        var refId = selector.match(/^\[ref=(e\d+)\]$/)[1];
+        var SKIP = new Set(['script','style','noscript','template','svg','path','defs','clippath','lineargradient','stop','meta','link','br','wbr']);
+        var INTERACTIVE = new Set(['button','link','textbox','checkbox','radio','combobox','listbox','menuitem','menuitemcheckbox','menuitemradio','option','searchbox','slider','spinbutton','switch','tab','treeitem']);
+        var CONTENT = new Set(['heading','cell','gridcell','columnheader','rowheader','listitem','article','region','main','navigation','img']);
+        function getRole(el) {{
+            var explicit = el.getAttribute('role');
+            if (explicit) return explicit.toLowerCase();
+            var tag = el.tagName.toLowerCase();
+            var map = {{'a': el.hasAttribute('href')?'link':'generic','button':'button','select':'combobox','textarea':'textbox','img':'img','h1':'heading','h2':'heading','h3':'heading','h4':'heading','h5':'heading','h6':'heading','nav':'navigation','main':'main','header':'banner','footer':'contentinfo','aside':'complementary','form':'form','table':'table','thead':'rowgroup','tbody':'rowgroup','tfoot':'rowgroup','tr':'row','th':'columnheader','td':'cell','ul':'list','ol':'list','li':'listitem','details':'group','summary':'button','dialog':'dialog','article':'article'}};
+            if (tag === 'input') {{
+                var type = (el.getAttribute('type')||'text').toLowerCase();
+                var imap = {{'text':'textbox','email':'textbox','password':'textbox','search':'searchbox','tel':'textbox','url':'textbox','number':'spinbutton','checkbox':'checkbox','radio':'radio','submit':'button','reset':'button','button':'button','range':'slider'}};
+                return imap[type]||'textbox';
+            }}
+            if (tag === 'section') return (el.hasAttribute('aria-label')||el.hasAttribute('aria-labelledby'))?'region':'generic';
+            return map[tag]||'generic';
+        }}
+        function getName(el) {{
+            if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
+            return '';
+        }}
+        var counter = 0;
+        function findRef(el, depth) {{
+            if (depth > 15) return null;
+            var tag = el.tagName.toLowerCase();
+            if (SKIP.has(tag)) return null;
+            if (el.hidden || el.getAttribute('aria-hidden')==='true') return null;
+            var role = getRole(el);
+            var name = getName(el);
+            var shouldRef = INTERACTIVE.has(role) || (CONTENT.has(role) && name);
+            if (shouldRef) {{
+                counter++;
+                if ('e'+counter === refId) return el;
+            }}
+            for (var i = 0; i < el.children.length; i++) {{
+                var found = findRef(el.children[i], depth+1);
+                if (found) return found;
+            }}
+            return null;
+        }}
+        return findRef(document.body, 0);
+    }}
+    return document.querySelector(selector);
+}})('{}')"#,
+        selector.replace('\\', "\\\\").replace('\'', "\\'")
+    )
 }
 
 /// Create a SessionManager with appropriate stealth configuration from CLI flags
@@ -275,6 +367,37 @@ async fn status(cli: &Cli, config: &Config) -> Result<()> {
 
 async fn open(cli: &Cli, config: &Config, url: &str) -> Result<()> {
     let normalized_url = normalize_navigation_url(url)?;
+
+    if cli.extension {
+        let result = extension_send(
+            cli,
+            "Extension.createTab",
+            serde_json::json!({ "url": normalized_url }),
+        )
+        .await?;
+
+        let title = result
+            .get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "success": true,
+                    "url": normalized_url,
+                    "title": title
+                })
+            );
+        } else {
+            println!("{} {} (extension)", "✓".green(), title.bold());
+            println!("  {}", normalized_url.dimmed());
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let (browser, mut handler) = session_manager
         .get_or_create_session(cli.profile.as_deref())
@@ -340,6 +463,30 @@ async fn open(cli: &Cli, config: &Config, url: &str) -> Result<()> {
 
 async fn goto(cli: &Cli, config: &Config, url: &str, _timeout_ms: u64) -> Result<()> {
     let normalized_url = normalize_navigation_url(url)?;
+
+    if cli.extension {
+        extension_send(
+            cli,
+            "Page.navigate",
+            serde_json::json!({ "url": normalized_url }),
+        )
+        .await?;
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "url": normalized_url })
+            );
+        } else {
+            println!(
+                "{} Navigated to: {} (extension)",
+                "✓".green(),
+                normalized_url
+            );
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .goto(cli.profile.as_deref(), &normalized_url)
@@ -361,6 +508,17 @@ async fn goto(cli: &Cli, config: &Config, url: &str, _timeout_ms: u64) -> Result
 }
 
 async fn back(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        extension_eval(cli, "history.back()").await?;
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "success": true }));
+        } else {
+            println!("{} Went back (extension)", "✓".green());
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager.go_back(cli.profile.as_deref()).await?;
 
@@ -374,6 +532,17 @@ async fn back(cli: &Cli, config: &Config) -> Result<()> {
 }
 
 async fn forward(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        extension_eval(cli, "history.forward()").await?;
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "success": true }));
+        } else {
+            println!("{} Went forward (extension)", "✓".green());
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager.go_forward(cli.profile.as_deref()).await?;
 
@@ -387,6 +556,17 @@ async fn forward(cli: &Cli, config: &Config) -> Result<()> {
 }
 
 async fn reload(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        extension_send(cli, "Page.reload", serde_json::json!({})).await?;
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "success": true }));
+        } else {
+            println!("{} Page reloaded (extension)", "✓".green());
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager.reload(cli.profile.as_deref()).await?;
 
@@ -471,7 +651,38 @@ async fn pages(cli: &Cli, config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn switch(_cli: &Cli, _config: &Config, page_id: &str) -> Result<()> {
+async fn switch(cli: &Cli, _config: &Config, page_id: &str) -> Result<()> {
+    if cli.extension {
+        // In extension mode, page_id is expected to be a tab ID (numeric)
+        let tab_id: u64 = page_id.strip_prefix("tab:").unwrap_or(page_id).parse().map_err(|_| {
+            ActionbookError::Other(format!(
+                "Invalid tab ID: {}. Use the numeric ID from 'pages' command (extension mode)",
+                page_id
+            ))
+        })?;
+
+        extension_send(
+            cli,
+            "Extension.activateTab",
+            serde_json::json!({ "tabId": tab_id }),
+        )
+        .await?;
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "tabId": tab_id })
+            );
+        } else {
+            println!(
+                "{} Switched to tab {} (extension)",
+                "✓".green(),
+                tab_id
+            );
+        }
+        return Ok(());
+    }
+
     // Note: This would require storing the active page ID in session state
     // For now, we just acknowledge the command
     println!(
@@ -483,6 +694,39 @@ async fn switch(_cli: &Cli, _config: &Config, page_id: &str) -> Result<()> {
 }
 
 async fn wait(cli: &Cli, config: &Config, selector: &str, timeout_ms: u64) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let poll_js = format!(
+            r#"(async function() {{
+                var deadline = Date.now() + {};
+                while (Date.now() < deadline) {{
+                    var el = {};
+                    if (el) return true;
+                    await new Promise(r => setTimeout(r, 100));
+                }}
+                return false;
+            }})()"#,
+            timeout_ms, resolve_js
+        );
+        let found = extension_eval(cli, &poll_js).await?;
+        if found.as_bool() != Some(true) {
+            return Err(ActionbookError::Timeout(format!(
+                "Element not found within {}ms (extension mode): {}",
+                timeout_ms, selector
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector })
+            );
+        } else {
+            println!("{} Element found: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .wait_for_element(cli.profile.as_deref(), selector, timeout_ms)
@@ -504,6 +748,44 @@ async fn wait(cli: &Cli, config: &Config, selector: &str, timeout_ms: u64) -> Re
 }
 
 async fn wait_nav(cli: &Cli, config: &Config, timeout_ms: u64) -> Result<()> {
+    if cli.extension {
+        // Poll document.readyState until "complete" or timeout
+        let poll_js = format!(
+            r#"(async function() {{
+                var deadline = Date.now() + {};
+                while (Date.now() < deadline) {{
+                    if (document.readyState === 'complete') return window.location.href;
+                    await new Promise(r => setTimeout(r, 100));
+                }}
+                return document.readyState === 'complete' ? window.location.href : null;
+            }})()"#,
+            timeout_ms
+        );
+        let result = extension_eval(cli, &poll_js).await?;
+        let new_url = result.as_str().unwrap_or("").to_string();
+
+        if new_url.is_empty() {
+            return Err(ActionbookError::Timeout(format!(
+                "Navigation did not complete within {}ms (extension mode)",
+                timeout_ms
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "url": new_url })
+            );
+        } else {
+            println!(
+                "{} Navigation complete: {} (extension)",
+                "✓".green(),
+                new_url
+            );
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let new_url = session_manager
         .wait_for_navigation(cli.profile.as_deref(), timeout_ms)
@@ -525,6 +807,65 @@ async fn wait_nav(cli: &Cli, config: &Config, timeout_ms: u64) -> Result<()> {
 }
 
 async fn click(cli: &Cli, config: &Config, selector: &str, wait_ms: u64) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let click_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                el.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                el.click();
+                return {{ success: true }};
+            }})()"#,
+            resolve_js
+        );
+
+        if wait_ms > 0 {
+            // Reuse the wait logic
+            let poll_js = format!(
+                r#"(async function() {{
+                    var deadline = Date.now() + {};
+                    while (Date.now() < deadline) {{
+                        var el = {};
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 100));
+                    }}
+                    return false;
+                }})()"#,
+                wait_ms, resolve_js
+            );
+            let found = extension_eval(cli, &poll_js).await?;
+            if found.as_bool() != Some(true) {
+                return Err(ActionbookError::Timeout(format!(
+                    "Element not found within {}ms (extension mode): {}",
+                    wait_ms, selector
+                )));
+            }
+        }
+
+        let result = extension_eval(cli, &click_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Click failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector })
+            );
+        } else {
+            println!("{} Clicked: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     if wait_ms > 0 {
@@ -559,6 +900,77 @@ async fn type_text(
     text: &str,
     wait_ms: u64,
 ) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'");
+
+        if wait_ms > 0 {
+            let poll_js = format!(
+                r#"(async function() {{
+                    var deadline = Date.now() + {};
+                    while (Date.now() < deadline) {{
+                        var el = {};
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 100));
+                    }}
+                    return false;
+                }})()"#,
+                wait_ms, resolve_js
+            );
+            let found = extension_eval(cli, &poll_js).await?;
+            if found.as_bool() != Some(true) {
+                return Err(ActionbookError::Timeout(format!(
+                    "Element not found within {}ms (extension mode): {}",
+                    wait_ms, selector
+                )));
+            }
+        }
+
+        let type_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                el.focus();
+                var text = '{}';
+                for (var i = 0; i < text.length; i++) {{
+                    el.dispatchEvent(new KeyboardEvent('keydown', {{ key: text[i], bubbles: true }}));
+                    el.dispatchEvent(new KeyboardEvent('keypress', {{ key: text[i], bubbles: true }}));
+                    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
+                        el.value += text[i];
+                    }} else if (el.isContentEditable) {{
+                        el.textContent += text[i];
+                    }}
+                    el.dispatchEvent(new InputEvent('input', {{ data: text[i], inputType: 'insertText', bubbles: true }}));
+                    el.dispatchEvent(new KeyboardEvent('keyup', {{ key: text[i], bubbles: true }}));
+                }}
+                return {{ success: true }};
+            }})()"#,
+            resolve_js, escaped_text
+        );
+
+        let result = extension_eval(cli, &type_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Type failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector, "text": text })
+            );
+        } else {
+            println!("{} Typed into: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     if wait_ms > 0 {
@@ -588,6 +1000,81 @@ async fn type_text(
 }
 
 async fn fill(cli: &Cli, config: &Config, selector: &str, text: &str, wait_ms: u64) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'");
+
+        if wait_ms > 0 {
+            let poll_js = format!(
+                r#"(async function() {{
+                    var deadline = Date.now() + {};
+                    while (Date.now() < deadline) {{
+                        var el = {};
+                        if (el) return true;
+                        await new Promise(r => setTimeout(r, 100));
+                    }}
+                    return false;
+                }})()"#,
+                wait_ms, resolve_js
+            );
+            let found = extension_eval(cli, &poll_js).await?;
+            if found.as_bool() != Some(true) {
+                return Err(ActionbookError::Timeout(format!(
+                    "Element not found within {}ms (extension mode): {}",
+                    wait_ms, selector
+                )));
+            }
+        }
+
+        let fill_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                el.focus();
+                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {{
+                    var nativeSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    ) || Object.getOwnPropertyDescriptor(
+                        window.HTMLTextAreaElement.prototype, 'value'
+                    );
+                    if (nativeSetter && nativeSetter.set) {{
+                        nativeSetter.set.call(el, '{}');
+                    }} else {{
+                        el.value = '{}';
+                    }}
+                }} else if (el.isContentEditable) {{
+                    el.textContent = '{}';
+                }}
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return {{ success: true }};
+            }})()"#,
+            resolve_js, escaped_text, escaped_text, escaped_text
+        );
+
+        let result = extension_eval(cli, &fill_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Fill failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector, "text": text })
+            );
+        } else {
+            println!("{} Filled: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     if wait_ms > 0 {
@@ -617,6 +1104,50 @@ async fn fill(cli: &Cli, config: &Config, selector: &str, text: &str, wait_ms: u
 }
 
 async fn select(cli: &Cli, config: &Config, selector: &str, value: &str) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let escaped_value = value.replace('\\', "\\\\").replace('\'', "\\'");
+        let select_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                if (el.tagName !== 'SELECT') return {{ success: false, error: 'Element is not a <select>' }};
+                el.value = '{}';
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return {{ success: true }};
+            }})()"#,
+            resolve_js, escaped_value
+        );
+
+        let result = extension_eval(cli, &select_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Select failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector, "value": value })
+            );
+        } else {
+            println!(
+                "{} Selected '{}' in: {} (extension)",
+                "✓".green(),
+                value,
+                selector
+            );
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .select_on_page(cli.profile.as_deref(), selector, value)
@@ -639,6 +1170,43 @@ async fn select(cli: &Cli, config: &Config, selector: &str, value: &str) -> Resu
 }
 
 async fn hover(cli: &Cli, config: &Config, selector: &str) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let hover_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                el.scrollIntoView({{ block: 'center', behavior: 'instant' }});
+                el.dispatchEvent(new MouseEvent('mouseenter', {{ bubbles: true }}));
+                el.dispatchEvent(new MouseEvent('mouseover', {{ bubbles: true }}));
+                return {{ success: true }};
+            }})()"#,
+            resolve_js
+        );
+
+        let result = extension_eval(cli, &hover_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Hover failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector })
+            );
+        } else {
+            println!("{} Hovered: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .hover_on_page(cli.profile.as_deref(), selector)
@@ -660,6 +1228,41 @@ async fn hover(cli: &Cli, config: &Config, selector: &str) -> Result<()> {
 }
 
 async fn focus(cli: &Cli, config: &Config, selector: &str) -> Result<()> {
+    if cli.extension {
+        let resolve_js = js_resolve_selector(selector);
+        let focus_js = format!(
+            r#"(function() {{
+                var el = {};
+                if (!el) return {{ success: false, error: 'Element not found' }};
+                el.focus();
+                return {{ success: true }};
+            }})()"#,
+            resolve_js
+        );
+
+        let result = extension_eval(cli, &focus_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            let err = result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown error");
+            return Err(ActionbookError::ExtensionError(format!(
+                "Focus failed (extension mode): {}",
+                err
+            )));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "selector": selector })
+            );
+        } else {
+            println!("{} Focused: {} (extension)", "✓".green(), selector);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .focus_on_page(cli.profile.as_deref(), selector)
@@ -681,6 +1284,60 @@ async fn focus(cli: &Cli, config: &Config, selector: &str) -> Result<()> {
 }
 
 async fn press(cli: &Cli, config: &Config, key: &str) -> Result<()> {
+    if cli.extension {
+        let escaped_key = key.replace('\\', "\\\\").replace('\'', "\\'");
+        let press_js = format!(
+            r#"(function() {{
+                var key = '{}';
+                var el = document.activeElement || document.body;
+                var opts = {{ key: key, code: 'Key' + key, bubbles: true, cancelable: true }};
+                // Map common key names
+                var keyMap = {{
+                    'Enter': {{ key: 'Enter', code: 'Enter' }},
+                    'Tab': {{ key: 'Tab', code: 'Tab' }},
+                    'Escape': {{ key: 'Escape', code: 'Escape' }},
+                    'Backspace': {{ key: 'Backspace', code: 'Backspace' }},
+                    'Delete': {{ key: 'Delete', code: 'Delete' }},
+                    'ArrowUp': {{ key: 'ArrowUp', code: 'ArrowUp' }},
+                    'ArrowDown': {{ key: 'ArrowDown', code: 'ArrowDown' }},
+                    'ArrowLeft': {{ key: 'ArrowLeft', code: 'ArrowLeft' }},
+                    'ArrowRight': {{ key: 'ArrowRight', code: 'ArrowRight' }},
+                    'Space': {{ key: ' ', code: 'Space' }},
+                    'Home': {{ key: 'Home', code: 'Home' }},
+                    'End': {{ key: 'End', code: 'End' }},
+                    'PageUp': {{ key: 'PageUp', code: 'PageUp' }},
+                    'PageDown': {{ key: 'PageDown', code: 'PageDown' }},
+                }};
+                if (keyMap[key]) {{
+                    opts.key = keyMap[key].key;
+                    opts.code = keyMap[key].code;
+                }}
+                el.dispatchEvent(new KeyboardEvent('keydown', opts));
+                el.dispatchEvent(new KeyboardEvent('keypress', opts));
+                el.dispatchEvent(new KeyboardEvent('keyup', opts));
+                return {{ success: true }};
+            }})()"#,
+            escaped_key
+        );
+
+        let result = extension_eval(cli, &press_js).await?;
+        if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+            return Err(ActionbookError::ExtensionError(
+                "Press failed (extension mode)".to_string(),
+            ));
+        }
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "key": key })
+            );
+        } else {
+            println!("{} Pressed: {} (extension)", "✓".green(), key);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .press_key(cli.profile.as_deref(), key)
@@ -702,6 +1359,55 @@ async fn press(cli: &Cli, config: &Config, key: &str) -> Result<()> {
 }
 
 async fn screenshot(cli: &Cli, config: &Config, path: &str, full_page: bool) -> Result<()> {
+    if cli.extension {
+        let mut params = serde_json::json!({ "format": "png" });
+        if full_page {
+            params["captureBeyondViewport"] = serde_json::json!(true);
+        }
+
+        let result = extension_send(cli, "Page.captureScreenshot", params).await?;
+        let b64_data = result
+            .get("data")
+            .and_then(|d| d.as_str())
+            .ok_or_else(|| {
+                ActionbookError::ExtensionError(
+                    "Screenshot response missing 'data' field (extension mode)".to_string(),
+                )
+            })?;
+
+        let screenshot_data = base64::engine::general_purpose::STANDARD
+            .decode(b64_data)
+            .map_err(|e| {
+                ActionbookError::ExtensionError(format!(
+                    "Failed to decode screenshot base64 (extension mode): {}",
+                    e
+                ))
+            })?;
+
+        if let Some(parent) = Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        fs::write(path, screenshot_data)?;
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "path": path, "fullPage": full_page })
+            );
+        } else {
+            let mode = if full_page { " (full page)" } else { "" };
+            println!(
+                "{} Screenshot saved{}: {} (extension)",
+                "✓".green(),
+                mode,
+                path
+            );
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     let screenshot_data = if full_page {
@@ -739,6 +1445,44 @@ async fn screenshot(cli: &Cli, config: &Config, path: &str, full_page: bool) -> 
 }
 
 async fn pdf(cli: &Cli, config: &Config, path: &str) -> Result<()> {
+    if cli.extension {
+        let result = extension_send(cli, "Page.printToPDF", serde_json::json!({})).await?;
+        let b64_data = result
+            .get("data")
+            .and_then(|d| d.as_str())
+            .ok_or_else(|| {
+                ActionbookError::ExtensionError(
+                    "PDF response missing 'data' field (extension mode)".to_string(),
+                )
+            })?;
+
+        let pdf_data = base64::engine::general_purpose::STANDARD
+            .decode(b64_data)
+            .map_err(|e| {
+                ActionbookError::ExtensionError(format!(
+                    "Failed to decode PDF base64 (extension mode): {}",
+                    e
+                ))
+            })?;
+
+        if let Some(parent) = Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        fs::write(path, pdf_data)?;
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "success": true, "path": path })
+            );
+        } else {
+            println!("{} PDF saved: {} (extension)", "✓".green(), path);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let pdf_data = session_manager.pdf_page(cli.profile.as_deref()).await?;
 
@@ -804,6 +1548,39 @@ async fn eval(cli: &Cli, config: &Config, code: &str) -> Result<()> {
 }
 
 async fn html(cli: &Cli, config: &Config, selector: Option<&str>) -> Result<()> {
+    if cli.extension {
+        let js = match selector {
+            Some(sel) => {
+                let resolve_js = js_resolve_selector(sel);
+                format!(
+                    r#"(function() {{
+                        var el = {};
+                        return el ? el.outerHTML : null;
+                    }})()"#,
+                    resolve_js
+                )
+            }
+            None => "document.documentElement.outerHTML".to_string(),
+        };
+
+        let value = extension_eval(cli, &js).await?;
+        let html = value.as_str().unwrap_or("").to_string();
+
+        if selector.is_some() && html.is_empty() {
+            return Err(ActionbookError::ExtensionError(format!(
+                "Element not found (extension mode): {}",
+                selector.unwrap_or("")
+            )));
+        }
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "html": html }));
+        } else {
+            println!("{}", html);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let html = session_manager
         .get_html(cli.profile.as_deref(), selector)
@@ -819,6 +1596,39 @@ async fn html(cli: &Cli, config: &Config, selector: Option<&str>) -> Result<()> 
 }
 
 async fn text(cli: &Cli, config: &Config, selector: Option<&str>) -> Result<()> {
+    if cli.extension {
+        let js = match selector {
+            Some(sel) => {
+                let resolve_js = js_resolve_selector(sel);
+                format!(
+                    r#"(function() {{
+                        var el = {};
+                        return el ? el.innerText : null;
+                    }})()"#,
+                    resolve_js
+                )
+            }
+            None => "document.body.innerText".to_string(),
+        };
+
+        let value = extension_eval(cli, &js).await?;
+        let text = value.as_str().unwrap_or("").to_string();
+
+        if selector.is_some() && value.is_null() {
+            return Err(ActionbookError::ExtensionError(format!(
+                "Element not found (extension mode): {}",
+                selector.unwrap_or("")
+            )));
+        }
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "text": text }));
+        } else {
+            println!("{}", text);
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let text = session_manager
         .get_text(cli.profile.as_deref(), selector)
@@ -834,8 +1644,6 @@ async fn text(cli: &Cli, config: &Config, selector: Option<&str>) -> Result<()> 
 }
 
 async fn snapshot(cli: &Cli, config: &Config) -> Result<()> {
-    let session_manager = create_session_manager(cli, config);
-
     // Build accessibility tree with proper tree structure, filtering, and refs.
     // Modeled after agent-browser's snapshot.ts output format.
     // Text nodes are captured as { role: "text", content: "..." } children.
@@ -1047,9 +1855,14 @@ async fn snapshot(cli: &Cli, config: &Config) -> Result<()> {
         })()
     "#;
 
-    let value = session_manager
-        .eval_on_page(cli.profile.as_deref(), js)
-        .await?;
+    let value = if cli.extension {
+        extension_eval(cli, js).await?
+    } else {
+        let session_manager = create_session_manager(cli, config);
+        session_manager
+            .eval_on_page(cli.profile.as_deref(), js)
+            .await?
+    };
 
     if cli.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
@@ -1146,6 +1959,123 @@ fn render_snapshot_tree(node: &serde_json::Value, depth: usize) -> String {
 }
 
 async fn inspect(cli: &Cli, config: &Config, x: f64, y: f64, desc: Option<&str>) -> Result<()> {
+    if cli.extension {
+        // In extension mode, use JS elementFromPoint + gather info
+        let inspect_js = format!(
+            r#"(function() {{
+                var vw = window.innerWidth, vh = window.innerHeight;
+                var x = {}, y = {};
+                if (x < 0 || x > vw || y < 0 || y > vh) {{
+                    return {{ outOfBounds: true, viewport: {{ width: vw, height: vh }} }};
+                }}
+                var el = document.elementFromPoint(x, y);
+                if (!el) return {{ found: false, viewport: {{ width: vw, height: vh }} }};
+                var rect = el.getBoundingClientRect();
+                var attrs = {{}};
+                for (var i = 0; i < el.attributes.length && i < 20; i++) {{
+                    attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 100);
+                }}
+                var parents = [];
+                var p = el.parentElement;
+                for (var i = 0; i < 5 && p && p !== document.body; i++) {{
+                    parents.push({{ tagName: p.tagName.toLowerCase(), id: p.id || '', className: (p.className || '').substring(0, 60) }});
+                    p = p.parentElement;
+                }}
+                var interactive = ['A','BUTTON','INPUT','SELECT','TEXTAREA'].indexOf(el.tagName) >= 0
+                    || el.getAttribute('role') === 'button'
+                    || el.getAttribute('tabindex') !== null;
+                var selectors = [];
+                if (el.id) selectors.push('#' + el.id);
+                if (el.className && typeof el.className === 'string') {{
+                    var cls = el.className.trim().split(/\\s+/).slice(0,2).join('.');
+                    if (cls) selectors.push(el.tagName.toLowerCase() + '.' + cls);
+                }}
+                selectors.push(el.tagName.toLowerCase());
+                return {{
+                    found: true,
+                    viewport: {{ width: vw, height: vh }},
+                    tagName: el.tagName.toLowerCase(),
+                    id: el.id || '',
+                    className: (el.className || '').substring(0, 100),
+                    textContent: (el.textContent || '').trim().substring(0, 200),
+                    isInteractive: interactive,
+                    boundingBox: {{ x: rect.x, y: rect.y, width: rect.width, height: rect.height }},
+                    attributes: attrs,
+                    suggestedSelectors: selectors,
+                    parents: parents
+                }};
+            }})()"#,
+            x, y
+        );
+
+        let result = extension_eval(cli, &inspect_js).await?;
+
+        if result.get("outOfBounds").and_then(|v| v.as_bool()) == Some(true) {
+            let vp = result.get("viewport").unwrap_or(&serde_json::Value::Null);
+            let vw = vp.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let vh = vp.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "success": false,
+                        "message": format!("Coordinates ({}, {}) are outside viewport bounds ({}x{})", x, y, vw, vh)
+                    })
+                );
+            } else {
+                println!(
+                    "{} Coordinates ({}, {}) are outside viewport bounds ({}x{}) (extension)",
+                    "!".yellow(), x, y, vw as i32, vh as i32
+                );
+            }
+            return Ok(());
+        }
+
+        if cli.json {
+            let mut output = serde_json::json!({
+                "success": true,
+                "coordinates": { "x": x, "y": y },
+                "inspection": result
+            });
+            if let Some(d) = desc {
+                output["description"] = serde_json::json!(d);
+            }
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            let found = result.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+            if !found {
+                println!("{} No element found at ({}, {}) (extension)", "!".yellow(), x, y);
+                return Ok(());
+            }
+            if let Some(d) = desc {
+                println!("{} Inspecting: {} (extension)\n", "?".cyan(), d.bold());
+            }
+            let tag = result.get("tagName").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let id = result.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+            let class = result.get("className").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+            print!("{}", "Element: ".bold());
+            print!("<{}", tag.cyan());
+            if let Some(i) = id { print!(" id=\"{}\"", i.green()); }
+            if let Some(c) = class { print!(" class=\"{}\"", c.yellow()); }
+            println!(">");
+            if let Some(text) = result.get("textContent").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                println!("{}", "Text:".bold());
+                println!("  {}", text.dimmed());
+            }
+            if let Some(selectors) = result.get("suggestedSelectors").and_then(|v| v.as_array()) {
+                if !selectors.is_empty() {
+                    println!("{}", "Suggested Selectors:".bold());
+                    for sel in selectors {
+                        if let Some(s) = sel.as_str() {
+                            println!("  {} {}", "->".cyan(), s);
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     // Get viewport to validate coordinates
@@ -1342,6 +2272,42 @@ async fn inspect(cli: &Cli, config: &Config, x: f64, y: f64, desc: Option<&str>)
 }
 
 async fn viewport(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        let value = extension_eval(
+            cli,
+            "JSON.stringify({width: window.innerWidth, height: window.innerHeight})",
+        )
+        .await?;
+
+        let dims: serde_json::Value = match value.as_str() {
+            Some(s) => serde_json::from_str(s).unwrap_or(serde_json::Value::Null),
+            None => value,
+        };
+        let width = dims
+            .get("width")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let height = dims
+            .get("height")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::json!({ "width": width, "height": height })
+            );
+        } else {
+            println!(
+                "{} {}x{} (extension)",
+                "Viewport:".bold(),
+                width as i32,
+                height as i32
+            );
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     let (width, height) = session_manager.get_viewport(cli.profile.as_deref()).await?;
 
@@ -1361,6 +2327,10 @@ async fn viewport(cli: &Cli, config: &Config) -> Result<()> {
 }
 
 async fn cookies(cli: &Cli, config: &Config, command: &Option<CookiesCommands>) -> Result<()> {
+    if cli.extension {
+        return cookies_extension(cli, command).await;
+    }
+
     let session_manager = create_session_manager(cli, config);
 
     match command {
@@ -1461,7 +2431,161 @@ async fn cookies(cli: &Cli, config: &Config, command: &Option<CookiesCommands>) 
     Ok(())
 }
 
+async fn cookies_extension(cli: &Cli, command: &Option<CookiesCommands>) -> Result<()> {
+    match command {
+        None | Some(CookiesCommands::List) => {
+            let result = extension_send(cli, "Network.getCookies", serde_json::json!({})).await?;
+            let cookies = result
+                .get("cookies")
+                .and_then(|c| c.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&cookies)?);
+            } else if cookies.is_empty() {
+                println!("{} No cookies (extension)", "!".yellow());
+            } else {
+                println!(
+                    "{} {} cookies (extension)\n",
+                    "✓".green(),
+                    cookies.len()
+                );
+                for cookie in &cookies {
+                    let name = cookie.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let value = cookie.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                    let domain = cookie
+                        .get("domain")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    println!(
+                        "  {} = {} {}",
+                        name.bold(),
+                        value,
+                        format!("({})", domain).dimmed()
+                    );
+                }
+            }
+        }
+        Some(CookiesCommands::Get { name }) => {
+            let result = extension_send(cli, "Network.getCookies", serde_json::json!({})).await?;
+            let cookies = result
+                .get("cookies")
+                .and_then(|c| c.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let cookie = cookies
+                .iter()
+                .find(|c| c.get("name").and_then(|v| v.as_str()) == Some(name));
+
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&cookie)?);
+            } else {
+                match cookie {
+                    Some(c) => {
+                        let value = c.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                        println!("{} = {}", name, value);
+                    }
+                    None => println!("{} Cookie not found: {} (extension)", "!".yellow(), name),
+                }
+            }
+        }
+        Some(CookiesCommands::Set {
+            name,
+            value,
+            domain,
+        }) => {
+            let mut params = serde_json::json!({
+                "name": name,
+                "value": value,
+            });
+            if let Some(d) = domain {
+                params["domain"] = serde_json::json!(d);
+            } else {
+                // Get current URL domain as fallback
+                let url_val = extension_eval(cli, "window.location.href").await?;
+                let url = url_val.as_str().unwrap_or("");
+                if let Some(host) = url
+                    .split("://")
+                    .nth(1)
+                    .and_then(|s| s.split('/').next())
+                {
+                    params["domain"] = serde_json::json!(host);
+                }
+                params["url"] = serde_json::json!(url);
+            }
+
+            extension_send(cli, "Network.setCookie", params).await?;
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "success": true, "name": name, "value": value })
+                );
+            } else {
+                println!(
+                    "{} Cookie set: {} = {} (extension)",
+                    "✓".green(),
+                    name,
+                    value
+                );
+            }
+        }
+        Some(CookiesCommands::Delete { name }) => {
+            // Need the domain to delete
+            let url_val = extension_eval(cli, "window.location.href").await?;
+            let url = url_val.as_str().unwrap_or("").to_string();
+
+            extension_send(
+                cli,
+                "Network.deleteCookies",
+                serde_json::json!({ "name": name, "url": url }),
+            )
+            .await?;
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "success": true, "name": name })
+                );
+            } else {
+                println!(
+                    "{} Cookie deleted: {} (extension)",
+                    "✓".green(),
+                    name
+                );
+            }
+        }
+        Some(CookiesCommands::Clear) => {
+            extension_send(
+                cli,
+                "Network.clearBrowserCookies",
+                serde_json::json!({}),
+            )
+            .await?;
+
+            if cli.json {
+                println!("{}", serde_json::json!({ "success": true }));
+            } else {
+                println!("{} All cookies cleared (extension)", "✓".green());
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn close(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        extension_send(cli, "Extension.detachTab", serde_json::json!({})).await?;
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "success": true }));
+        } else {
+            println!("{} Tab detached (extension)", "✓".green());
+        }
+        return Ok(());
+    }
+
     let session_manager = create_session_manager(cli, config);
     session_manager
         .close_session(cli.profile.as_deref())
@@ -1482,6 +2606,18 @@ async fn close(cli: &Cli, config: &Config) -> Result<()> {
 }
 
 async fn restart(cli: &Cli, config: &Config) -> Result<()> {
+    if cli.extension {
+        // In extension mode, reload the page as a "restart"
+        extension_send(cli, "Page.reload", serde_json::json!({})).await?;
+
+        if cli.json {
+            println!("{}", serde_json::json!({ "success": true }));
+        } else {
+            println!("{} Page reloaded (extension restart)", "✓".green());
+        }
+        return Ok(());
+    }
+
     // Close existing session
     close(cli, config).await?;
 

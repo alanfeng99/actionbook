@@ -238,6 +238,8 @@ mod tests {
             stealth_gpu: None,
             api_key: None,
             json: false,
+            extension: false,
+            extension_port: 19222,
             verbose: false,
             command: crate::cli::Commands::Config {
                 command: crate::cli::ConfigCommands::Show,
@@ -264,6 +266,8 @@ mod tests {
             stealth_gpu: None,
             api_key: None,
             json: false,
+            extension: false,
+            extension_port: 19222,
             verbose: false,
             command: crate::cli::Commands::Config {
                 command: crate::cli::ConfigCommands::Show,
@@ -288,6 +292,8 @@ mod tests {
             stealth_gpu: None,
             api_key: None,
             json: false,
+            extension: false,
+            extension_port: 19222,
             verbose: false,
             command: crate::cli::Commands::Config {
                 command: crate::cli::ConfigCommands::Show,
