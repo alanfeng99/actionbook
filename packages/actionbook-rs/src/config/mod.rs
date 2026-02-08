@@ -75,13 +75,13 @@ impl Default for BrowserConfig {
 }
 
 fn default_profile_name() -> String {
-    "default".to_string()
+    "actionbook".to_string()
 }
 
 impl Default for Config {
     fn default() -> Self {
         let mut profiles = HashMap::new();
-        profiles.insert("default".to_string(), ProfileConfig::default());
+        profiles.insert(default_profile_name(), ProfileConfig::default());
 
         Self {
             api: ApiConfig::default(),
@@ -140,8 +140,8 @@ impl Config {
             return Ok(profile.clone());
         }
 
-        // If asking for "default" and it doesn't exist, create one
-        if name == "default" {
+        // If asking for configured default profile and it doesn't exist, create an implicit one.
+        if name == self.browser.default_profile {
             let mut profile = ProfileConfig::default();
 
             // Apply browser config defaults
@@ -174,5 +174,49 @@ impl Config {
             .ok_or_else(|| ActionbookError::ProfileNotFound(name.to_string()))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_uses_actionbook_profile() {
+        let config = Config::default();
+
+        assert_eq!(config.browser.default_profile, "actionbook");
+        assert!(config.profiles.contains_key("actionbook"));
+    }
+
+    #[test]
+    fn get_profile_returns_implicit_configured_default_profile() {
+        let config = Config {
+            api: ApiConfig::default(),
+            browser: BrowserConfig {
+                executable: Some("/Applications/Google Chrome.app".to_string()),
+                default_profile: "team".to_string(),
+                headless: true,
+            },
+            profiles: HashMap::new(),
+        };
+
+        let profile = config.get_profile("team").unwrap();
+        assert_eq!(
+            profile.browser_path.as_deref(),
+            Some("/Applications/Google Chrome.app")
+        );
+        assert!(profile.headless);
+    }
+
+    #[test]
+    fn get_profile_returns_error_for_non_default_missing_profile() {
+        let config = Config::default();
+        let result = config.get_profile("missing-profile");
+
+        assert!(matches!(
+            result,
+            Err(ActionbookError::ProfileNotFound(name)) if name == "missing-profile"
+        ));
     }
 }
