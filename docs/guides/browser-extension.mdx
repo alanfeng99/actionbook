@@ -19,19 +19,25 @@ Extension mode is ideal when your automation needs access to pages that require 
 ## Setup
 
 <Steps>
-  <Step title="Install the extension files">
-    Extract the bundled Chrome extension to your local config directory:
+  <Step title="Install the extension">
+    Download and install the latest extension from GitHub:
 
     ```bash
     actionbook extension install
     ```
+
+    This downloads the latest release from GitHub and installs it to `~/.config/actionbook/extension/`.
+
+    <Tip>
+      **Manual download alternative:** If the CLI install fails (e.g., GitHub rate limit), you can download the `.zip` directly from [GitHub Releases](https://github.com/actionbook/actionbook/releases), unzip it to a local folder, and load it manually.
+    </Tip>
   </Step>
 
   <Step title="Load into Chrome">
     1. Open `chrome://extensions` in Chrome
     2. Enable **Developer mode** (top-right toggle)
     3. Click **Load unpacked**
-    4. Select the directory shown by:
+    4. Select the extension directory:
 
     ```bash
     actionbook extension path
@@ -199,5 +205,17 @@ L3 operations on sensitive domains trigger a confirmation popup in the extension
     - The extension defaults to `ws://localhost:19222`
     - Start the bridge with a matching port: `actionbook extension serve --port <PORT>`
     - Pass the port to browser commands: `--extension-port <PORT>`
+  </Accordion>
+
+  <Accordion title="GitHub rate limit on install">
+    - Anonymous GitHub API allows 60 requests/hour
+    - Wait a few minutes and retry, or download the `.zip` manually from [GitHub Releases](https://github.com/actionbook/actionbook/releases)
+    - Unzip to a local folder and use **Load unpacked** in Chrome
+  </Accordion>
+
+  <Accordion title="Offline install">
+    - Download the `actionbook-extension-v*.zip` from another machine with internet access
+    - Unzip to `~/.config/actionbook/extension/`
+    - Run `actionbook extension install --force` to register native messaging
   </Accordion>
 </AccordionGroup>
