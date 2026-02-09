@@ -97,20 +97,52 @@ Based on the topic, generate 5-8 search queries from different angles:
 - Expert opinions / analysis
 - Use cases / applications
 
-**Search order — ALWAYS start with arXiv Advanced Search:**
+**Search order — ALWAYS query Actionbook API first, then search:**
 
 | Step | Action | Why |
 |------|--------|-----|
-| **Step 2 (FIRST)** | **arXiv Advanced Search** | Actionbook's core advantage: 40+ indexed selectors for multi-field, filtered academic search. Even non-academic topics often have relevant papers. |
-| **Step 3 (SECOND)** | Google / Bing search | Supplement with blogs, news, code, discussions, non-academic sources. |
+| **Step 2 (FIRST)** | **Query Actionbook API** | Get verified selectors for arXiv Advanced Search form, ar5iv papers, and any other known sites BEFORE browsing. This is the foundation for all subsequent steps. |
+| **Step 3 (SECOND)** | **arXiv Advanced Search** | Use Actionbook selectors from Step 2 to perform multi-field, filtered academic search. Even non-academic topics often have relevant papers. |
+| **Step 4 (THIRD)** | Google / Bing search | Supplement with blogs, news, code, discussions, non-academic sources. |
 
-**IMPORTANT:** arXiv Advanced Search is the **default first search** for ALL topics. This is what makes Actionbook-powered research fundamentally different from WebFetch/WebSearch. Even for topics like "WebAssembly ecosystem" or "Rust async runtime", there are arXiv papers with deeper technical insights than any blog post.
+**IMPORTANT:** Always query Actionbook API first (Step 2) to get selectors, then use them in arXiv Advanced Search (Step 3). This is what makes Actionbook-powered research fundamentally different from WebFetch/WebSearch — the agent knows the exact selectors for every form field before it even opens the browser.
 
-### Step 2: arXiv Advanced Search (ALWAYS DO THIS FIRST)
+### Step 2: Query Actionbook API for Selectors (ALWAYS DO THIS FIRST)
 
-> **Key differentiator:** WebFetch/WebSearch can only do simple keyword searches. Actionbook has indexed the **entire arXiv Advanced Search form** with 40+ verified selectors, enabling multi-field, multi-criteria academic searches — just like a human researcher would use the form.
+**BEFORE browsing any URL, query Actionbook's indexed selectors.** This gives you verified CSS/XPath selectors instead of guessing.
 
-Actionbook knows every interactive element on the arXiv advanced search page (`arxiv.org:/search/advanced:default`). This lets the Agent:
+```bash
+# Search for indexed actions by domain
+actionbook search "<keywords>" -d "<domain>"
+
+# Get detailed selectors for a specific page
+actionbook get "<domain>:/<path>:<area>"
+```
+
+**Pre-indexed sites useful for research:**
+
+| Site | area_id | Key Selectors |
+|------|---------|---------------|
+| arXiv Advanced Search | `arxiv.org:/search/advanced:default` | **40+ selectors**: field select, term input, category checkboxes (CS/Physics/Math/...), date range filters, cross-list control — used in Step 3 |
+| ar5iv paper | `ar5iv.labs.arxiv.org:/html/{paper_id}:default` | `h1.ltx_title_document` (title), `div.ltx_authors` (authors), `div.ltx_abstract` (abstract), `section.ltx_section` (sections) |
+| Google Scholar | `scholar.google.com:/:default` | `#gs_hdr_tsi` (search input), `#gs_hdr_tsb` (search button) |
+| arXiv homepage | `arxiv.org:/:default` | Global search across 2.4M+ articles |
+
+**For any URL you plan to visit**, run `actionbook search "<keywords>" -d "<domain>"` to check if it's indexed. Use indexed selectors when available; fall back to `actionbook browser snapshot` for unindexed sites.
+
+**Example: Get arXiv Advanced Search selectors before searching:**
+
+```bash
+# Query Actionbook for arXiv form selectors
+actionbook get "arxiv.org:/search/advanced:default"
+# Returns 40+ selectors: #terms-0-field, #terms-0-term, #classification-computer_science, etc.
+```
+
+### Step 3: arXiv Advanced Search (Using Actionbook Selectors)
+
+> **Key differentiator:** WebFetch/WebSearch can only do simple keyword searches. Actionbook has indexed the **entire arXiv Advanced Search form** with 40+ verified selectors (queried in Step 2), enabling multi-field, multi-criteria academic searches — just like a human researcher would use the form.
+
+Using the selectors obtained from Step 2, the Agent can:
 
 | Capability | Actionbook Selector | WebFetch/WebSearch |
 |------------|--------------------|--------------------|
@@ -169,7 +201,7 @@ actionbook browser click "button:has-text('Search'):nth(2)"
 actionbook browser text "#main-container"
 ```
 
-### Step 3: Supplement with Google / Bing Search
+### Step 4: Supplement with Google / Bing Search
 
 After arXiv, use Google/Bing to find non-academic sources (blogs, news, docs, code, discussions):
 
@@ -183,34 +215,11 @@ actionbook browser open "https://www.bing.com/search?q=<encoded_query>"
 actionbook browser text "#b_results"
 ```
 
-Parse the search results to extract URLs and snippets. Collect the top 5-10 most relevant URLs.
-
-### Step 4: Query Actionbook API for Known Site Selectors
-
-**BEFORE browsing any URL, check if Actionbook has indexed the site's structure.** This gives you verified CSS/XPath selectors instead of guessing.
-
-```bash
-# Step 3a: Search for indexed actions by domain
-actionbook search "<keywords>" -d "<domain>"
-
-# Step 3b: Get detailed selectors for a specific page
-actionbook get "<domain>:/<path>:<area>"
-```
-
-**Pre-indexed sites useful for research:**
-
-| Site | area_id | Key Selectors |
-|------|---------|---------------|
-| ar5iv paper | `ar5iv.labs.arxiv.org:/html/{paper_id}:default` | `h1.ltx_title_document` (title), `div.ltx_authors` (authors), `div.ltx_abstract` (abstract), `section.ltx_section` (sections) |
-| Google Scholar | `scholar.google.com:/:default` | `#gs_hdr_tsi` (search input), `#gs_hdr_tsb` (search button) |
-| arXiv search | `arxiv.org:/search/advanced:default` | **40+ selectors**: field select, term input, category checkboxes (CS/Physics/Math/...), date range filters, cross-list control — see Step 2b |
-| arXiv homepage | `arxiv.org:/:default` | Global search across 2.4M+ articles |
-
-**For any other URL**, run `actionbook search "<keywords>" -d "<domain>"` to check if it's indexed. Use indexed selectors when available; fall back to `actionbook browser snapshot` for unindexed sites.
+Parse the search results to extract URLs and snippets. Collect the top 5-10 most relevant URLs. For each discovered URL, query Actionbook API (Step 2 pattern) to check if the site is indexed before visiting.
 
 ### Step 5: Deep Read Sources
 
-For each relevant URL, use Actionbook-verified selectors when available:
+For each relevant URL, **first query Actionbook API** (same as Step 2) to check if the site is indexed, then use verified selectors:
 
 ```bash
 actionbook browser open "<url>"
@@ -446,6 +455,7 @@ When analyzing academic papers, use a richer template with:
 | `MetricsGrid.suffix` as i18n object | `text.replace is not a function` | `suffix` must be a **plain string**, not `{ "en": ..., "zh": ... }` |
 | `MetricsGrid.value` as number | Render error | `value` must be a **string** (e.g., `"58.5"` not `58.5`) |
 | Missing `BrandHeader`/`BrandFooter` | Report looks broken | Always include both |
+| `Table` row values as i18n object | `[object Object]` in cells | Row cell values must be **plain strings**. Column `label` supports i18n, but row data does not. Use `"Runtimes / 运行时"` instead of `{ "en": "Runtimes", "zh": "运行时" }` |
 | Very long Prose content | Truncated render | Split into multiple Prose blocks or use subsections |
 
 ### i18n Support
@@ -457,7 +467,9 @@ All text fields support bilingual output **unless noted above**:
 
 For `--lang en`, use plain strings. For `--lang zh`, use plain Chinese strings. For `--lang both` (default), use i18n objects.
 
-**Exception:** `MetricsGrid` props `value` and `suffix` must always be plain strings.
+**Exceptions:**
+- `MetricsGrid` props `value` and `suffix` must always be plain strings.
+- `Table` row cell values must be plain strings (column `label` supports i18n, but row data does not). For bilingual, use `"English / 中文"` format.
 
 ## Academic Paper Support
 
@@ -533,3 +545,46 @@ Use `actionbook browser` to visit and extract content from:
 4. **Structure**: Use appropriate json-ui components for each content type
 5. **Attribution**: Always include source links in the report
 6. **Freshness**: Prefer recent sources when relevance is equal
+
+## Chinese Content Quality Guidelines (中文内容质量规范)
+
+**CRITICAL: Chinese text must be written as native Chinese, NOT translated from English.**
+
+The `zh` field is not a translation — it is an independent Chinese version of the content. Write it as if authoring a Chinese tech article from scratch.
+
+### Common Problems to Avoid
+
+| Problem | Bad Example | Good Example |
+|---------|-------------|--------------|
+| 被动语态过多 | "Wasm 已被广泛采用" | "Wasm 已经大规模落地" |
+| 英语语序直译 | "广泛但常常不可见地被采用" | "已经深入渗透到各类产品中，只是用户浑然不觉" |
+| 生硬术语拼接 | "语言无关的异步通信" | "不绑定特定编程语言的异步通信机制" |
+| 直译英文短语 | "关键缺失部分" | "最后一块拼图" |
+| "地道"当形容词 | "地道绑定" | "符合各语言习惯的绑定" |
+| 逗号长句（一逗到底） | "A，B，C，D，E。" | 拆成 2-3 个短句 |
+| 引用原文硬翻 | "「许多用户并未意识到它正在被使用」" | 用中文重新表述引用的核心意思，必要时保留原文人名 |
+
+### Writing Rules
+
+1. **先写中文，再对照英文查漏**：不要从英文逐句翻译。先理解内容本质，用中文重新组织表达。
+2. **主动语态优先**：中文天然偏好主动句。"X 被 Y 采用" → "Y 采纳了 X" 或 "Y 已在用 X"。
+3. **短句 > 长句**：中文读者偏好短句。超过 40 字的句子应拆分。
+4. **术语处理原则**：
+   - 有公认中文译名的术语用中文：服务器 → 服务器、容器 → 容器、沙箱 → 沙箱
+   - 无公认译名的术语保留英文：Component Model、WASI、SIMD、Cold Start
+   - 首次出现时中英对照：「组件模型（Component Model）」，之后可只用中文
+   - 不要硬造中文译名（如"非干扰分析"，应写"Noninterference 分析"或解释性表述）
+5. **数据和事实保持一致**：中英文的数字、日期、引用来源必须完全一致。
+6. **语气自然**：可以用"说白了"、"换句话说"、"简单来说"等口语化连接词，避免全篇书面腔。
+7. **标点规范**：用中文标点（，。；：「」）而非英文标点。引号优先用「」。
+
+### Bilingual Tone Reference
+
+| English Tone | Chinese Equivalent | Example |
+|--------------|-------------------|---------|
+| "X has reached a critical milestone" | 不要直译"关键里程碑" | "X 迎来了重要转折点" 或 "X 进入成熟期" |
+| "This is the key missing piece" | 不要直译"关键缺失部分" | "这是最后一块拼图" 或 "补上了最关键的短板" |
+| "excels at cold starts" | 不要直译"在冷启动方面表现卓越" | "冷启动速度远超同类方案" |
+| "security scrutiny intensifies" | 不要直译"安全审查加强" | "安全领域的关注度持续升温" |
+| "emerging as a standard" | 不要直译"正成为标准" | "逐渐确立了标准地位" 或 "大有一统江湖之势" |
+| "widespread but invisible adoption" | 不要直译"广泛但不可见的采用" | "已经悄然渗透到各类产品中" |

@@ -4,6 +4,65 @@
 
 All you need is **Claude Code** + **Actionbook CLI**. Everything runs locally on your machine.
 
+## Demo Gallery
+
+### Demo 1: Elon Musk's X.com Posting Activity
+
+> `/deep-research:analyze "Research how many tweets Elon Musk posted today on X.com"`
+
+The agent logged into X.com via Actionbook browser, queried `from:elonmusk since:2026-02-09`, scrolled through all results, and produced a comprehensive activity report:
+
+**What the agent did:**
+1. Queried Actionbook API for X.com selectors
+2. Opened X.com Advanced Search via `actionbook browser`
+3. Scrolled to exhaustion to capture all tweets
+4. Counted 38+ original tweets/replies + 2 retweets
+5. Identified 3 distinct posting bursts and 6 topic categories
+6. Generated bilingual (EN/ZH) json-ui report
+
+**Report highlights:**
+
+| Metric | Value |
+|--------|-------|
+| Total Posts (as of 12:30 UTC) | 38+ tweets/replies |
+| Peak Rate | ~1 tweet per 3 min |
+| Most Viewed | "Grok" (Tim Pool quote) — 21M views |
+| Top Topics | Epstein/Bannon (7), Politics (8), Grok/xAI (6) |
+| Posting Pattern | 3 bursts with 3-4h dormant gaps |
+
+Output: [`output/musk-tweets-2026-02-09.json`](output/musk-tweets-2026-02-09.json)
+
+---
+
+### Demo 2: WebAssembly 2026 Ecosystem Deep Dive
+
+> `/deep-research:analyze "WebAssembly 2026 ecosystem"`
+
+The agent combined **arXiv Advanced Search** (academic papers) with **Google** (industry sources) to produce a comprehensive ecosystem report:
+
+**What the agent did:**
+1. Queried Actionbook API for arXiv Advanced Search selectors (40+ form fields)
+2. Searched arXiv: title="WebAssembly", CS category, date range 2025-01 to 2026-02 → **20 papers found**
+3. Searched Google for industry sources (WasmCon 2025, Fermyon, The New Stack)
+4. Deep-read 8+ sources via `actionbook browser`
+5. Synthesized academic + industry perspectives into a single report
+
+**Report highlights:**
+
+| Metric | Value |
+|--------|-------|
+| Spec Version | WebAssembly 3.0 (published Feb 6, 2026) |
+| WASI Version | 0.3.0 (WASIp3, imminent) |
+| arXiv Papers Found | 20 (CS category, 2025-2026) |
+| Research Clusters | Serverless/Edge (8), Security (5), IoT (2), Tooling (3), Other (2) |
+| Key Runtimes | Wasmtime, Wasmer, WasmEdge, WAMR |
+
+**Key finding:** Wasm is already everywhere — most users don't realize it. The academic consensus: Wasm excels at cold starts and workload density vs containers.
+
+Output: [`output/webassembly-2026-ecosystem-v2.json`](output/webassembly-2026-ecosystem-v2.json)
+
+---
+
 ## Why Actionbook?
 
 Traditional AI tools (WebFetch, WebSearch) can only do simple keyword searches and read raw HTML. Actionbook is different — it **indexes website UI structures** and gives AI agents verified selectors to operate complex web forms.
@@ -18,6 +77,10 @@ Actionbook has indexed the entire arXiv Advanced Search form (40+ selectors). Th
 | Filter to Computer Science papers only | Click `#classification-computer_science` checkbox |
 | Restrict to papers from 2025-2026 | Set date range via `#date-from_date` / `#date-to_date` |
 | Add multiple search terms with boolean logic | Click "Add another term +" button |
+
+**Example: X.com (Twitter) Search**
+
+The agent can log into X.com, use advanced search operators (`from:user since:date`), scroll through results, and extract engagement metrics — all via Actionbook browser automation.
 
 None of this is possible with WebFetch or WebSearch — they can only send a single keyword query.
 
@@ -93,64 +156,13 @@ Then type:
 /deep-research:analyze "WebAssembly 2026 ecosystem"
 ```
 
-Or in natural language:
+Or in natural language (supports English and Chinese):
 
 ```
-帮我深度研究 WebAssembly 2026 生态并生成报告
+Research the WebAssembly 2026 ecosystem and generate a report
 ```
 
 That's it! The agent will search the web, read sources, generate a report, and open it in your browser.
-
-## Complete Demo: Research an arXiv Paper
-
-Here's a full end-to-end example using only Claude Code:
-
-```
-# 1. Start Claude Code (from any directory if you did Option A)
-claude
-
-# 2. Ask it to analyze a paper
-> /deep-research:analyze "arxiv:2501.12599"
-
-# What happens behind the scenes:
-# - Agent opens arXiv Advanced Search via Actionbook browser
-# - Uses indexed selectors to search by paper ID
-# - Reads the paper from ar5iv.org with verified selectors
-# - Fetches supplementary info from HuggingFace, GitHub
-# - Generates a json-ui JSON report
-# - Renders to HTML and opens in your browser
-
-# 3. The HTML report opens automatically
-# You'll see: title, authors, abstract, key contributions,
-# method overview, results table, source links — all beautifully formatted
-```
-
-**What you'll see:**
-
-```
-┌─────────────────────────────────────────────────┐
-│  🔬 Deep Research Report  ·  Powered by Actionbook  │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  📄 Paper: Da Vinci: Elevating Coding Agents    │
-│     Authors: ...                                │
-│     arXiv: 2501.12599 · Jan 2025               │
-│                                                 │
-│  ⭐ Key Contributions                           │
-│  1. Agent-Environment Interface Design          │
-│  2. RepoGraph for Repository Comprehension      │
-│  3. State-of-the-art on SWE-bench Verified     │
-│                                                 │
-│  📊 Results                                     │
-│  ┌────────────┬──────────────┐                  │
-│  │ Benchmark  │ Score        │                  │
-│  ├────────────┼──────────────┤                  │
-│  │ SWE-bench  │ 58.6% (+6)  │                  │
-│  └────────────┴──────────────┘                  │
-│                                                 │
-│  🔗 Sources: arxiv, ar5iv, GitHub, HuggingFace  │
-└─────────────────────────────────────────────────┘
-```
 
 ## Command Reference
 
@@ -160,24 +172,36 @@ claude
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `topic` | Yes | — | Any topic, technology, or `arxiv:XXXX.XXXXX` |
+| `topic` | Yes | — | Any topic, technology, URL, or `arxiv:XXXX.XXXXX` |
 | `--lang` | No | `both` | `en`, `zh`, or `both` |
 | `--output` | No | `./output/<slug>.json` | Custom output path |
+
+### Topic Detection
+
+| Pattern | Type | Strategy |
+|---------|------|----------|
+| `arxiv:XXXX.XXXXX` | Paper | arXiv Advanced Search + ar5iv deep read |
+| Academic keywords | Academic topic | arXiv Advanced Search + Google |
+| URL | Specific page | Actionbook browser fetch and analyze |
+| General text | Topic research | Google search + arXiv if relevant |
 
 ### More Examples
 
 ```bash
-# Research a technology
-/deep-research:analyze "Rust async runtime comparison 2026"
+# Research a specific website's data (like X.com, Reddit, HackerNews)
+/deep-research:analyze "Research how many tweets Elon Musk posted today on X.com"
+
+# Deep dive a technology ecosystem
+/deep-research:analyze "WebAssembly 2026 ecosystem"
 
 # Analyze an arXiv paper
-/deep-research:analyze "arxiv:2601.08521"
+/deep-research:analyze "arxiv:2501.12599"
 
 # Search by research topic (uses arXiv Advanced Search)
 /deep-research:analyze "large language model agent papers 2025"
 
-# Report in Chinese
-/deep-research:analyze "大语言模型推理优化" --lang zh
+# Report in Chinese only
+/deep-research:analyze "LLM inference optimization" --lang zh
 
 # Custom output path
 /deep-research:analyze "RISC-V ecosystem" --output ./reports/riscv.json
@@ -203,43 +227,63 @@ claude
 └──────────┘     └──────────────┘     └──────────────┘
 ```
 
-1. **Plan**: Decide search strategy — arXiv Advanced Search for academic topics, Google for general topics
-2. **Search**: Use `actionbook browser` to search the web, with Actionbook-indexed selectors for known sites
-3. **Read**: Visit top sources, extract text via verified selectors
-4. **Synthesize**: Organize findings into structured sections
-5. **Generate**: Write a json-ui JSON report
-6. **Render**: Produce self-contained HTML
-7. **View**: Open the report in your browser
+### Workflow Steps
 
-## Report Components
+| Step | Action | Description |
+|------|--------|-------------|
+| 1 | **Plan** | Decide search strategy based on topic type |
+| 2 | **Query Actionbook API** | Get verified selectors for known sites (arXiv, X.com, etc.) BEFORE browsing |
+| 3 | **arXiv Advanced Search** | Multi-field academic search using Actionbook selectors (if topic is academic) |
+| 4 | **Google / Bing** | Supplement with blogs, news, code, non-academic sources |
+| 5 | **Deep Read** | Visit top sources, extract content via verified selectors |
+| 6 | **Synthesize** | Organize findings into structured sections |
+| 7 | **Generate** | Write a json-ui JSON report (bilingual EN/ZH) |
+| 8 | **Render** | Produce self-contained HTML via `@actionbookdev/json-ui` |
+| 9 | **View** | Open the report in your browser |
+| 10 | **Close** | Close the Actionbook browser session |
 
-Reports use `@actionbookdev/json-ui` components:
+## Features
 
-| Section | Icon | Description |
-|---------|------|-------------|
-| Brand Header | — | Actionbook branding |
-| Overview | paper | Topic summary |
-| Key Findings | star | Numbered core findings |
-| Detailed Analysis | bulb | In-depth examination |
-| Key Metrics | chart | Numbers and stats |
-| Sources | link | Reference links |
-| Brand Footer | — | Timestamp and disclaimer |
+### Bilingual Reports (EN/ZH)
 
-For academic papers, additional components:
-- `PaperHeader` with arXiv metadata
-- `AuthorList` with affiliations
-- `Formula` for LaTeX equations
-- `ResultsTable` with benchmark comparisons
+All reports are bilingual by default. The Chinese content follows quality guidelines to ensure natural, native Chinese writing — not machine translation.
 
-## Customization
+Key principles:
+- Chinese text is written independently, not translated from English
+- Active voice preferred over passive voice
+- Technical terms with established Chinese names use Chinese; others keep English
+- Short sentences preferred (Chinese readers prefer concise phrasing)
 
-### Modify Report Template
+### Actionbook Browser Automation
 
-Edit `agents/researcher.md` to change default report sections, component usage, research depth, or language defaults.
+The skill uses `actionbook browser` CLI commands exclusively (not WebFetch/WebSearch):
 
-### Available json-ui Components
+```bash
+actionbook browser open <url>        # Navigate to page
+actionbook browser text [selector]   # Extract text content
+actionbook browser click <selector>  # Click element
+actionbook browser snapshot          # Get accessibility tree
+actionbook browser close             # Close browser
+```
 
-See `skills/deep-research/SKILL.md` for the full component catalog (20+ components).
+### json-ui Report Components
+
+Reports use 20+ `@actionbookdev/json-ui` components:
+
+| Component | Use For |
+|-----------|---------|
+| `BrandHeader` / `BrandFooter` | Actionbook branding |
+| `Section` | Major report sections with icons |
+| `Prose` | Rich text content (Markdown) |
+| `ContributionList` | Numbered key findings |
+| `MetricsGrid` | Key stats dashboard |
+| `Table` | Data tables |
+| `LinkGroup` | Source links |
+| `Callout` | Important notes / warnings |
+| `CodeBlock` | Code snippets |
+| `Formula` | LaTeX equations (for papers) |
+
+See `skills/deep-research/SKILL.md` for the full component catalog.
 
 ## Troubleshooting
 
@@ -251,6 +295,7 @@ See `skills/deep-research/SKILL.md` for the full component catalog (20+ componen
 | Empty report | Check internet connection, try a simpler topic |
 | HTML render fails | The JSON report is saved at `./output/<slug>.json` — you can render it later |
 | Skill not found | Ensure SKILL.md is at `~/.claude/skills/deep-research/SKILL.md` |
+| Chinese text reads like machine translation | The skill includes quality guidelines — re-run to regenerate |
 
 ## Project Structure
 
@@ -270,6 +315,9 @@ playground/deep-research/
 ├── examples/
 │   └── sample-report.json       # Sample json-ui report
 ├── output/                      # Generated reports (gitignored)
+│   ├── musk-tweets-2026-02-09.json
+│   ├── webassembly-2026-ecosystem-v2.json
+│   └── ...
 ├── .gitignore
 └── README.md
 ```
