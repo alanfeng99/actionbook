@@ -1,31 +1,44 @@
 # Deep Research
 
-> Analyze any topic, domain, or paper and generate a beautiful HTML report — powered by Actionbook CLI and json-ui.
+> Analyze any topic, domain, or paper and generate a beautiful HTML report — powered by Actionbook and Claude Code.
 
-```
-/deep-research:analyze "WebAssembly 2026 ecosystem"
-```
+All you need is **Claude Code** + **Actionbook CLI**. Everything runs locally on your machine.
 
-## Features
+## Why Actionbook?
 
-- **Actionbook CLI powered** — Uses `actionbook browser` for all web browsing and content extraction
-- **Beautiful HTML reports** — Rendered via `@actionbookdev/json-ui` with light/dark theme, responsive layout
-- **Bilingual** — Reports support English, Chinese, or both
-- **Academic papers** — Understands arXiv IDs, fetches from ar5iv.org with structured selectors
-- **Pure local** — Runs entirely on your machine via Claude Code
+Traditional AI tools (WebFetch, WebSearch) can only do simple keyword searches and read raw HTML. Actionbook is different — it **indexes website UI structures** and gives AI agents verified selectors to operate complex web forms.
 
-## Quick Start
+**Example: arXiv Advanced Search**
+
+Actionbook has indexed the entire arXiv Advanced Search form (40+ selectors). This means the AI agent can:
+
+| What the agent can do | How |
+|-----------------------|-----|
+| Search by Title, Author, or Abstract separately | Select field via `#terms-0-field` dropdown |
+| Filter to Computer Science papers only | Click `#classification-computer_science` checkbox |
+| Restrict to papers from 2025-2026 | Set date range via `#date-from_date` / `#date-to_date` |
+| Add multiple search terms with boolean logic | Click "Add another term +" button |
+
+None of this is possible with WebFetch or WebSearch — they can only send a single keyword query.
+
+## Quick Start (from Zero)
 
 ### Prerequisites
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed
-- [Actionbook CLI](https://www.npmjs.com/package/@actionbookdev/cli) installed (`npm i -g @actionbookdev/cli`)
+- **Node.js 18+** (check: `node --version`)
 - A Chromium-based browser (Chrome, Brave, Edge, Arc)
+- An Anthropic API key
 
 ### Step 1: Install Claude Code
 
 ```bash
 npm install -g @anthropic-ai/claude-code
+```
+
+Verify:
+
+```bash
+claude --version
 ```
 
 ### Step 2: Install Actionbook CLI
@@ -34,40 +47,115 @@ npm install -g @anthropic-ai/claude-code
 npm install -g @actionbookdev/cli
 ```
 
-Verify installation:
+Verify:
 
 ```bash
+actionbook --version
 actionbook browser status
 ```
 
-### Step 3: Add the Skill
+### Step 3: Add the Deep Research Skill
 
-**Option A: Use from this repository**
+**Option A: Install as standalone skill (recommended)**
+
+Copy the skill to your Claude Code skills directory:
+
+```bash
+mkdir -p ~/.claude/skills/deep-research
+cp playground/deep-research/skills/deep-research/SKILL.md ~/.claude/skills/deep-research/SKILL.md
+```
+
+Now the skill works in **any directory** with Claude Code.
+
+**Option B: Use as a project plugin**
+
+Copy the entire `playground/deep-research/` directory into your project:
+
+```bash
+cp -r playground/deep-research/ /path/to/your/project/deep-research/
+```
+
+Then start Claude Code from that directory. It auto-detects `.claude-plugin/plugin.json`.
+
+**Option C: Use directly from this repo**
 
 ```bash
 cd playground/deep-research
 claude
 ```
 
-Claude Code auto-detects the `.claude-plugin/plugin.json` in the working directory.
+### Step 4: Run Your First Research
 
-**Option B: Copy to your project**
-
-Copy the `playground/deep-research/` directory into your project, then start Claude Code from that directory.
-
-### Step 4: Run
+Start Claude Code:
 
 ```bash
-# In Claude Code:
+claude
+```
+
+Then type:
+
+```
 /deep-research:analyze "WebAssembly 2026 ecosystem"
 ```
 
-The agent will:
-1. Search the web using `actionbook browser`
-2. Read top sources and extract content
-3. Generate a structured JSON report
-4. Render to HTML via json-ui
-5. Open the report in your browser
+Or in natural language:
+
+```
+帮我深度研究 WebAssembly 2026 生态并生成报告
+```
+
+That's it! The agent will search the web, read sources, generate a report, and open it in your browser.
+
+## Complete Demo: Research an arXiv Paper
+
+Here's a full end-to-end example using only Claude Code:
+
+```
+# 1. Start Claude Code (from any directory if you did Option A)
+claude
+
+# 2. Ask it to analyze a paper
+> /deep-research:analyze "arxiv:2501.12599"
+
+# What happens behind the scenes:
+# - Agent opens arXiv Advanced Search via Actionbook browser
+# - Uses indexed selectors to search by paper ID
+# - Reads the paper from ar5iv.org with verified selectors
+# - Fetches supplementary info from HuggingFace, GitHub
+# - Generates a json-ui JSON report
+# - Renders to HTML and opens in your browser
+
+# 3. The HTML report opens automatically
+# You'll see: title, authors, abstract, key contributions,
+# method overview, results table, source links — all beautifully formatted
+```
+
+**What you'll see:**
+
+```
+┌─────────────────────────────────────────────────┐
+│  🔬 Deep Research Report  ·  Powered by Actionbook  │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  📄 Paper: Da Vinci: Elevating Coding Agents    │
+│     Authors: ...                                │
+│     arXiv: 2501.12599 · Jan 2025               │
+│                                                 │
+│  ⭐ Key Contributions                           │
+│  1. Agent-Environment Interface Design          │
+│  2. RepoGraph for Repository Comprehension      │
+│  3. State-of-the-art on SWE-bench Verified     │
+│                                                 │
+│  📊 Results                                     │
+│  ┌────────────┬──────────────┐                  │
+│  │ Benchmark  │ Score        │                  │
+│  ├────────────┼──────────────┤                  │
+│  │ SWE-bench  │ 58.6% (+6)  │                  │
+│  └────────────┴──────────────┘                  │
+│                                                 │
+│  🔗 Sources: arxiv, ar5iv, GitHub, HuggingFace  │
+└─────────────────────────────────────────────────┘
+```
 
 ## Command Reference
 
@@ -81,7 +169,7 @@ The agent will:
 | `--lang` | No | `both` | `en`, `zh`, or `both` |
 | `--output` | No | `./output/<slug>.json` | Custom output path |
 
-### Examples
+### More Examples
 
 ```bash
 # Research a technology
@@ -90,10 +178,13 @@ The agent will:
 # Analyze an arXiv paper
 /deep-research:analyze "arxiv:2601.08521"
 
+# Search by research topic (uses arXiv Advanced Search)
+/deep-research:analyze "large language model agent papers 2025"
+
 # Report in Chinese
 /deep-research:analyze "大语言模型推理优化" --lang zh
 
-# Custom output
+# Custom output path
 /deep-research:analyze "RISC-V ecosystem" --output ./reports/riscv.json
 ```
 
@@ -104,24 +195,30 @@ The agent will:
 │  Claude   │────▶│  Actionbook  │────▶│  Web Pages   │────▶│ Extract  │
 │  Code     │     │  Browser CLI │     │  (multiple)  │     │ Content  │
 └──────────┘     └──────────────┘     └──────────────┘     └─────┬────┘
-                                                                  │
+      │                                                           │
+      │          ┌──────────────┐     ┌──────────────┐           │
+      ├─────────▶│  Actionbook  │     │ arXiv Adv.   │           │
+      │          │  search/get  │────▶│ Search Form  │──────────▶│
+      │          │  (selectors) │     │ (40+ fields) │           │
+      │          └──────────────┘     └──────────────┘           │
+      │                                                           │
 ┌──────────┐     ┌──────────────┐     ┌──────────────┐           │
 │  Open in │◀────│   json-ui    │◀────│  Write JSON  │◀──────────┘
 │  Browser │     │   render     │     │  Report      │  Synthesize
 └──────────┘     └──────────────┘     └──────────────┘
 ```
 
-1. **Search**: Agent uses `actionbook browser open` to search Google/Bing
-2. **Collect**: Extracts URLs and snippets from search results
-3. **Read**: Visits top sources, extracts text via `actionbook browser text`
-4. **Synthesize**: Organizes findings into structured sections
-5. **Generate**: Writes a json-ui JSON report
-6. **Render**: `npx @actionbookdev/json-ui render report.json` produces HTML
-7. **View**: Opens the HTML report in your default browser
+1. **Plan**: Decide search strategy — arXiv Advanced Search for academic topics, Google for general topics
+2. **Search**: Use `actionbook browser` to search the web, with Actionbook-indexed selectors for known sites
+3. **Read**: Visit top sources, extract text via verified selectors
+4. **Synthesize**: Organize findings into structured sections
+5. **Generate**: Write a json-ui JSON report
+6. **Render**: Produce self-contained HTML
+7. **View**: Open the report in your browser
 
-## Report Structure
+## Report Components
 
-Reports are generated in `@actionbookdev/json-ui` format with these sections:
+Reports use `@actionbookdev/json-ui` components:
 
 | Section | Icon | Description |
 |---------|------|-------------|
@@ -133,65 +230,51 @@ Reports are generated in `@actionbookdev/json-ui` format with these sections:
 | Sources | link | Reference links |
 | Brand Footer | — | Timestamp and disclaimer |
 
-For academic papers, additional components are used:
+For academic papers, additional components:
 - `PaperHeader` with arXiv metadata
 - `AuthorList` with affiliations
 - `Formula` for LaTeX equations
-- `ResultsTable` with performance comparisons
-
-## Rendering the Sample Report
-
-To preview the sample report without running a full research:
-
-```bash
-npx @actionbookdev/json-ui render examples/sample-report.json
-```
-
-This generates an HTML file and opens it in your browser.
+- `ResultsTable` with benchmark comparisons
 
 ## Customization
 
 ### Modify Report Template
 
-Edit `agents/researcher.md` to change:
-- Default report sections
-- json-ui component usage
-- Research depth (number of sources)
-- Language defaults
+Edit `agents/researcher.md` to change default report sections, component usage, research depth, or language defaults.
 
-### Add Custom Components
+### Available json-ui Components
 
-The full list of json-ui components is available in `skills/deep-research/SKILL.md`. Add any component to the JSON template in `agents/researcher.md`.
+See `skills/deep-research/SKILL.md` for the full component catalog (20+ components).
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| `actionbook: command not found` | Run `npm i -g @actionbookdev/cli` |
-| Browser won't open | Check `actionbook browser status`. Ensure a Chromium browser is installed. |
-| `json-ui: command not found` | Use `npx @actionbookdev/json-ui@latest render` instead |
-| Empty report | Verify internet connection. Try a simpler topic. |
-| Permission denied | Check `.claude/settings.local.json` has the right permissions |
-| Report not bilingual | Add `--lang both` or ensure the agent template uses i18n objects |
+| `actionbook: command not found` | `npm i -g @actionbookdev/cli` |
+| `claude: command not found` | `npm i -g @anthropic-ai/claude-code` |
+| Browser won't open | `actionbook browser status` — ensure Chromium browser is installed |
+| Empty report | Check internet connection, try a simpler topic |
+| HTML render fails | The JSON report is saved at `./output/<slug>.json` — you can render it later |
+| Skill not found | Ensure SKILL.md is at `~/.claude/skills/deep-research/SKILL.md` |
 
 ## Project Structure
 
 ```
 playground/deep-research/
 ├── .claude-plugin/
-│   └── plugin.json              # Plugin manifest
-├── .claude/
-│   └── settings.local.json     # Permissions for actionbook/json-ui
-├── .mcp.json                   # Actionbook MCP server config
+│   ├── plugin.json              # Plugin manifest
+│   └── marketplace.json         # Marketplace metadata
+├── .mcp.json                    # Actionbook MCP server config
 ├── skills/
 │   └── deep-research/
-│       └── SKILL.md            # Main skill definition
+│       └── SKILL.md             # Main skill definition (core logic)
 ├── commands/
-│   └── analyze.md              # /deep-research:analyze command
+│   └── analyze.md               # /deep-research:analyze command
 ├── agents/
-│   └── researcher.md           # Research agent (sonnet, Bash+Read+Write)
+│   └── researcher.md            # Research agent (sonnet, Bash+Read+Write)
 ├── examples/
-│   └── sample-report.json      # Sample json-ui report
+│   └── sample-report.json       # Sample json-ui report
+├── output/                      # Generated reports (gitignored)
 ├── .gitignore
 └── README.md
 ```
