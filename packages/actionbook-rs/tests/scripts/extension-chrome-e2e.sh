@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Extension Bridge E2E Test — Real Chrome + Real Website (arxiv.org)
+# Extension Bridge E2E Test — Real Chrome + Real Website
 #
-# Connects to the user's EXISTING Chrome browser (with extension already installed)
-# and tests all CLI commands against real websites.
+# Uses automation-friendly test sites (the-internet.herokuapp.com) to avoid
+# rate limiting. Connects to the user's EXISTING Chrome browser (with extension
+# already installed) and tests all CLI commands against real websites.
 #
 # Prerequisites:
 #   1. Extension installed in your Chrome:
@@ -186,10 +187,15 @@ wait_for_extension() {
   return 1
 }
 
+# --- Test Sites (automation-friendly, no rate limiting) ---
+SITE="https://the-internet.herokuapp.com"
+SITE_NAME="the-internet"
+
 # ============================================================
-printf "\n\033[1m=== Extension Bridge E2E Test (Real Chrome + arxiv.org) ===\033[0m\n\n"
+printf "\n\033[1m=== Extension Bridge E2E Test (Real Chrome) ===\033[0m\n\n"
 printf "  This test connects to your EXISTING Chrome browser.\n"
-printf "  Make sure the Actionbook extension is installed and Chrome is open.\n\n"
+printf "  Make sure the Actionbook extension is installed and Chrome is open.\n"
+printf "  Test site: %s\n\n" "$SITE"
 
 # --- Pre-flight ---
 printf "\033[1m--- Pre-flight ---\033[0m\n"
@@ -258,49 +264,49 @@ run extension status --port "$BRIDGE_PORT"
 assert_contains "status" "running"
 
 # ============================================================
-# Phase 2: Navigate to arxiv.org
+# Phase 2: Navigate to test site
 # ============================================================
-printf "\033[1m--- Phase 2: Navigate to arxiv.org ---\033[0m\n"
+printf "\033[1m--- Phase 2: Navigate to $SITE_NAME ---\033[0m\n"
 
-# Use goto (navigates current attached tab, keeps debugger)
-run $EXT browser goto "https://arxiv.org"
-assert_success "goto-arxiv"
+# Open a fresh tab first (avoids chrome:// URL issues after extension reload)
+run $EXT browser open "$SITE"
+assert_success "goto-site"
 sleep 3
 
-# Verify we're on arxiv
+# Verify we're on the test site
 run $EXT browser eval "document.title"
 log_info "Page title: $(echo "$OUTPUT" | head -1)"
-assert_contains "arxiv-title" "arXiv"
+assert_contains "site-title" "Internet"
 
-# List tabs — should include arxiv
+# List tabs — should include test site
 run $EXT browser pages
-assert_contains "pages-has-arxiv" "arxiv\|arXiv"
+assert_contains "pages-has-site" "internet\|Internet\|herokuapp"
 
 # ============================================================
-# Phase 3: Content Extraction (Real arxiv DOM)
+# Phase 3: Content Extraction
 # ============================================================
-printf "\033[1m--- Phase 3: Content from arxiv ---\033[0m\n"
+printf "\033[1m--- Phase 3: Content Extraction ---\033[0m\n"
 
 # Eval: simple arithmetic
 run $EXT browser eval "1+1"
 assert_contains "eval-arithmetic" "2"
 
 # Eval: read real DOM
-run $EXT browser eval "document.querySelector('h1')?.textContent?.trim() || document.title"
+run $EXT browser eval "document.querySelector('h1,h2')?.textContent?.trim() || document.title"
 assert_success "eval-dom-query"
-log_info "H1 text: $(echo "$OUTPUT" | head -1)"
+log_info "Heading text: $(echo "$OUTPUT" | head -1)"
 
-# HTML: full page contains arxiv content
+# HTML: full page contains site content
 run $EXT browser html
-assert_contains "html-full-page" "arxiv"
+assert_contains "html-full-page" "Internet\|herokuapp"
 
-# HTML: with selector (positional argument, not --selector)
+# HTML: with selector
 run $EXT browser html "h1"
 assert_success "html-with-selector"
 
 # Text: page text
 run $EXT browser text
-assert_contains "text-page" "arXiv"
+assert_contains "text-page" "Available Examples\|Internet"
 
 # Viewport
 run $EXT browser viewport
@@ -308,17 +314,17 @@ assert_contains "viewport" "[Vv]iewport\|[0-9]*x[0-9]"
 log_info "Viewport: $(echo "$OUTPUT" | head -1)"
 
 # ============================================================
-# Phase 4: Screenshot & PDF (Real arxiv page)
+# Phase 4: Screenshot & PDF
 # ============================================================
 printf "\033[1m--- Phase 4: Screenshot & PDF ---\033[0m\n"
 
-SCREENSHOT_PATH="$TMPDIR/arxiv-screenshot.png"
+SCREENSHOT_PATH="$TMPDIR/e2e-screenshot.png"
 run $EXT browser screenshot "$SCREENSHOT_PATH"
 assert_success "screenshot-command"
 assert_file_exists "screenshot-file" "$SCREENSHOT_PATH"
 assert_file_size_gt "screenshot-has-content" "$SCREENSHOT_PATH" 5000
 
-PDF_PATH="$TMPDIR/arxiv.pdf"
+PDF_PATH="$TMPDIR/e2e-page.pdf"
 run $EXT browser pdf "$PDF_PATH"
 assert_success "pdf-command"
 assert_file_exists "pdf-file" "$PDF_PATH"
@@ -329,9 +335,9 @@ assert_file_size_gt "pdf-has-content" "$PDF_PATH" 5000
 # ============================================================
 printf "\033[1m--- Phase 5: Navigation ---\033[0m\n"
 
-# Navigate to a specific arxiv listing page
-run $EXT browser goto "https://arxiv.org/list/cs.AI/recent"
-assert_success "goto-cs-ai"
+# Navigate to a sub-page
+run $EXT browser goto "$SITE/login"
+assert_success "goto-login"
 sleep 3
 
 run $EXT browser eval "document.title"
@@ -342,7 +348,7 @@ run $EXT browser reload
 assert_success "reload"
 sleep 2
 
-# Go back to arxiv home
+# Go back to homepage
 run $EXT browser back
 assert_success "back"
 sleep 2
@@ -359,83 +365,79 @@ run $EXT browser eval "document.title"
 log_info "After forward: $(echo "$OUTPUT" | head -1)"
 
 # ============================================================
-# Phase 6: Real Interactions on arxiv
+# Phase 6: Interactions (login form on the-internet)
 # ============================================================
-printf "\033[1m--- Phase 6: Interactions on arxiv ---\033[0m\n"
+printf "\033[1m--- Phase 6: Interactions (login form) ---\033[0m\n"
 
-# Go to arxiv search page
-run $EXT browser goto "https://arxiv.org/search/"
-assert_success "goto-arxiv-search"
+# Go to login page (has username + password fields + Login button)
+run $EXT browser goto "$SITE/login"
+assert_success "goto-login-page"
 sleep 2
 
-# Type in search box (arxiv search input)
-run $EXT browser eval "document.querySelector('input[name=\"query\"]') ? 'found' : 'not-found'"
-SEARCH_INPUT_EXISTS=$(echo "$OUTPUT" | head -1)
+# Check that form fields exist
+run $EXT browser eval "document.querySelector('#username') ? 'found' : 'not-found'"
+LOGIN_INPUT_EXISTS=$(echo "$OUTPUT" | head -1)
 
-if echo "$SEARCH_INPUT_EXISTS" | grep -q "found"; then
-  # Fill the search box
-  run $EXT browser fill 'input[name="query"]' "transformer attention mechanism"
-  assert_success "fill-search-box"
+if echo "$LOGIN_INPUT_EXISTS" | grep -q "found"; then
+  # Fill the username field (public test credentials for the-internet.herokuapp.com)
+  run $EXT browser fill '#username' "tomsmith"
+  assert_success "fill-username"
 
   # Verify value was filled
   sleep 0.3
-  run $EXT browser eval "document.querySelector('input[name=\"query\"]').value"
-  assert_contains "fill-effect" "transformer"
+  run $EXT browser eval "document.querySelector('#username').value"
+  assert_contains "fill-effect" "tomsmith"
 
-  # Submit search — use form submit via JS for reliability
-  # (arxiv search button selector varies; form submit is universal)
-  run $EXT browser eval "document.querySelector('form[method=\"GET\"], form.search-form, form')?.submit()"
-  if [ "$EXIT_CODE" -ne 0 ]; then
-    # Fallback: try clicking any button with "Search" text
-    run $EXT browser click 'button.is-link'
-  fi
-  assert_success "click-search"
+  # Fill the password field
+  run $EXT browser fill '#password' "SuperSecretPassword!"
+  assert_success "fill-password"
+
+  # Click the Login button
+  run $EXT browser click 'button[type="submit"]'
+  assert_success "click-login"
   sleep 3
 
-  # Verify search results loaded
-  run $EXT browser eval "document.title"
-  log_info "Search results: $(echo "$OUTPUT" | head -1)"
-  assert_contains "search-results-page" "Search\|Results\|arXiv"
+  # Verify login success (redirects to /secure with success flash message)
+  run $EXT browser eval "window.location.pathname"
+  log_info "After login path: $(echo "$OUTPUT" | head -1)"
+  assert_contains "login-result-page" "secure"
 
-  # Click on first result link (arxiv uses p.list-title > a for paper links)
-  run $EXT browser eval "document.querySelector('p.list-title a, .list-title a, li.arxiv-result a')?.href || 'no-link'"
-  FIRST_LINK=$(echo "$OUTPUT" | head -1 | tr -d '"')
-  log_info "First result link: $FIRST_LINK"
+  # Click the Logout button to return to login page
+  run $EXT browser click 'a[href="/logout"]'
+  assert_success "click-logout"
+  sleep 2
 
-  if [ "$FIRST_LINK" != "no-link" ] && [ -n "$FIRST_LINK" ]; then
-    run $EXT browser click "p.list-title a"
-    if [ "$EXIT_CODE" -ne 0 ]; then
-      run $EXT browser click "li.arxiv-result a"
-    fi
-    assert_success "click-first-result"
-    sleep 3
-
-    # Verify we're on a paper page
-    run $EXT browser eval "document.title"
-    log_info "Paper page: $(echo "$OUTPUT" | head -1)"
-    run $EXT browser eval "window.location.href"
-    assert_contains "on-paper-page" "arxiv.org"
-  else
-    log_skip "click-first-result" "Could not find result link"
-  fi
+  run $EXT browser eval "window.location.href"
+  assert_contains "after-logout" "login"
 else
-  log_skip "fill-search-box" "Search input not found on page"
-  log_skip "fill-effect" "Skipped (no search input)"
-  log_skip "click-search" "Skipped"
-  log_skip "search-results-page" "Skipped"
-  log_skip "click-first-result" "Skipped"
+  log_skip "fill-username" "Login input not found on page"
+  log_skip "fill-effect" "Skipped (no login input)"
+  log_skip "fill-password" "Skipped"
+  log_skip "click-login" "Skipped"
+  log_skip "login-result-page" "Skipped"
+  log_skip "click-logout" "Skipped"
+  log_skip "after-logout" "Skipped"
 fi
 
 # ============================================================
-# Phase 7: Hover / Focus / Press / Select
+# Phase 7: Hover / Focus / Press
 # ============================================================
 printf "\033[1m--- Phase 7: Hover / Focus / Press ---\033[0m\n"
 
-# Hover on a link (any <a> tag)
-run $EXT browser hover "a"
-assert_success "hover-link"
+# Navigate to hovers page (has elements that respond to hover)
+run $EXT browser goto "$SITE/hovers"
+assert_success "goto-hovers"
+sleep 2
 
-# Focus on a link
+# Hover on an image (triggers hover effect showing user info)
+run $EXT browser hover ".figure"
+assert_success "hover-figure"
+
+# Navigate to a page with links for focus test
+run $EXT browser goto "$SITE"
+sleep 2
+
+# Focus on a link (homepage has many <a> tags with href)
 run $EXT browser focus "a"
 assert_success "focus-link"
 
@@ -448,11 +450,11 @@ run $EXT browser press Tab
 assert_success "press-tab"
 
 # ============================================================
-# Phase 8: Cookies
+# Phase 8: Cookies (uses chrome.cookies API via Extension.*)
 # ============================================================
 printf "\033[1m--- Phase 8: Cookies ---\033[0m\n"
 
-# List cookies for arxiv.org
+# List cookies for current site
 run $EXT browser cookies
 assert_success "cookies-list"
 
@@ -460,11 +462,15 @@ assert_success "cookies-list"
 run $EXT browser cookies set e2e_test_cookie "hello_from_e2e"
 assert_success "cookies-set"
 
+# Verify cookie was set by listing again
+run $EXT browser cookies
+log_info "Cookies after set: $(echo "$OUTPUT" | head -3 | tr '\n' ' ')"
+
 # Delete the test cookie
 run $EXT browser cookies delete e2e_test_cookie
 assert_success "cookies-delete"
 
-# Clear all cookies
+# Clear all cookies for this site
 run $EXT browser cookies clear
 assert_success "cookies-clear"
 
@@ -478,9 +484,9 @@ run $EXT browser pages
 assert_success "pages-list"
 log_info "Tabs: $(echo "$OUTPUT" | grep -c 'tab\|Tab' || echo '?') visible"
 
-# Open a new tab
-run $EXT browser open "https://arxiv.org/abs/1706.03762"
-assert_success "open-attention-paper"
+# Open a new tab (use example.com — always available, fast)
+run $EXT browser open "https://example.com"
+assert_success "open-new-tab"
 sleep 3
 
 run $EXT browser eval "document.title"
@@ -534,7 +540,7 @@ run $EXT browser close
 assert_success "close"
 
 # Restart (re-navigate)
-run $EXT browser goto "https://arxiv.org"
+run $EXT browser goto "$SITE"
 sleep 2
 run $EXT browser restart
 assert_success "restart"
