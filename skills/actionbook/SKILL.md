@@ -12,6 +12,28 @@ Activate this skill when the user:
 - Builds browser-based AI agents or web scrapers
 - Writes E2E tests for external websites
 - Navigates to any new page during browser automation
+- Wants to control their existing Chrome browser (Extension mode)
+
+## Browser Modes
+
+Actionbook supports two browser control modes:
+
+| Mode | Flag | Use Case |
+|------|------|----------|
+| **CDP** (default) | (none) | Launches a dedicated browser instance via Chrome DevTools Protocol |
+| **Extension** | `--extension` | Controls the user's existing Chrome browser via a Chrome Extension + WebSocket bridge |
+
+**When to use Extension mode:**
+- The user wants to operate on their already-open Chrome (with existing logins, cookies, tabs)
+- The task requires interacting with pages that need the user's real session state
+- The user explicitly mentions their Chrome browser, extension, or existing tabs
+
+**When to use CDP mode (default):**
+- Clean browser environment is preferred
+- Headless automation or CI/CD
+- Profile-based session isolation is needed
+
+All `actionbook browser` commands work identically in both modes. The only difference is adding `--extension` flag (or setting `ACTIONBOOK_EXTENSION=1`).
 
 ## How to Use
 
@@ -27,7 +49,7 @@ actionbook get "arxiv.org:/search/advanced:default"
 # Returns: Page structure, UI Elements with CSS/XPath selectors
 ```
 
-### Phase 2: Execute with Browser
+### Phase 2: Execute with Browser (CDP mode — default)
 
 ```bash
 # Step 3: Open browser
@@ -49,6 +71,19 @@ actionbook browser text
 # Step 7: Close browser
 actionbook browser close
 ```
+
+### Phase 2 (alt): Extension mode
+
+Extension mode uses identical commands — just add `--extension`. Ensure the bridge is running first (see [Extension Setup](#extension-setup--management)).
+
+```bash
+actionbook extension status                    # verify bridge is running
+actionbook --extension browser open "https://arxiv.org/search/advanced"
+actionbook --extension browser fill "#terms-0-term" "Neural Network"
+# ... remaining browser commands are the same, just add --extension
+```
+
+> **Note:** In extension mode, avoid `browser close` unless the user explicitly asks — it closes a tab in their real browser.
 
 ## Action Manual Format
 
@@ -86,6 +121,9 @@ actionbook sources search "<query>"            # Search sources by keyword
 ```
 
 ## Browser Commands
+
+> All browser commands below work in both CDP and Extension mode.
+> For Extension mode, add `--extension` flag or set `ACTIONBOOK_EXTENSION=1`.
 
 ### Navigation
 
@@ -164,15 +202,60 @@ actionbook browser cookies delete "name"       # Delete cookie
 actionbook browser cookies clear               # Clear all
 ```
 
+## Extension Setup & Management
+
+Commands for managing the Chrome Extension bridge:
+
+```bash
+actionbook extension install              # Install extension files and register native host
+actionbook extension uninstall            # Remove extension files and native host registration
+actionbook extension path                 # Show extension directory (for Chrome "Load unpacked")
+actionbook extension serve                # Start WebSocket bridge (keep running in a separate terminal)
+actionbook extension status               # Check bridge and extension connection status
+actionbook extension ping                 # Ping the extension to verify link is alive
+```
+
+**Setup flow (one-time):**
+
+1. **Install extension files:**
+   ```bash
+   actionbook extension install
+   ```
+
+2. **Load in Chrome:**
+   - Open `chrome://extensions` in your browser
+   - Enable **Developer mode** (toggle in top-right corner)
+   - Click **Load unpacked**
+   - Run `actionbook extension path` to get the directory, then select it
+
+3. **Start the WebSocket bridge:**
+   ```bash
+   actionbook extension serve   # Keep this running in a separate terminal
+   ```
+
+4. **Auto-pairing:** The extension connects automatically via native messaging. If auto-pairing fails: copy the token from `serve` output → paste in extension popup → Save
+
+**Connection check before automation:**
+```bash
+actionbook extension status    # should show "running"
+actionbook extension ping      # should show "responded"
+```
+
+For troubleshooting, see [references/extension-troubleshooting.md](references/extension-troubleshooting.md).
+
 ## Global Flags
 
 ```bash
-actionbook --json <command>           # JSON output
-actionbook --headless <command>       # Headless mode
-actionbook --verbose <command>        # Verbose logging
-actionbook -P <profile> <command>     # Use specific profile
-actionbook --cdp <port|url> <command> # CDP connection
+actionbook --json <command>                    # JSON output
+actionbook --headless <command>                # Headless mode (CDP only)
+actionbook --verbose <command>                 # Verbose logging
+actionbook -P <profile> <command>              # Use specific profile (CDP only)
+actionbook --cdp <port|url> <command>          # CDP connection
+actionbook --extension <command>               # Use Chrome Extension mode
+actionbook --extension-port <port> <command>   # Override bridge port (default: 19222)
 ```
+
+Environment variable alternative: `ACTIONBOOK_EXTENSION=1 actionbook <command>`
 
 ## Guidelines
 
@@ -181,6 +264,9 @@ actionbook --cdp <port|url> <command> # CDP connection
 - Prefer CSS ID selectors (`#id`) over XPath when both are provided
 - **Fallback to snapshot when selectors fail** - use `actionbook browser snapshot` then CSS selectors from the output
 - Re-snapshot after navigation - DOM changes invalidate previous state
+- **Extension mode**: always verify bridge is running (`actionbook extension status`) before sending browser commands
+- **Extension mode**: the user's real browser is being controlled — avoid destructive actions (clearing all cookies, closing all tabs) without confirmation
+- **Extension mode**: cookie and storage modifications may require manual approval in the extension popup
 
 ## Fallback Strategy
 
@@ -225,6 +311,37 @@ actionbook browser text
 actionbook browser close
 ```
 
+### Extension mode: Operate on user's Chrome
+
+```bash
+# Verify bridge is running
+actionbook extension status
+
+# Use the user's existing logged-in session
+actionbook --extension browser open "https://github.com/notifications"
+actionbook --extension browser wait-nav
+actionbook --extension browser text ".notifications-list"
+actionbook --extension browser screenshot notifications.png
+```
+
+### Extension mode: Startup Flow
+
+When using Extension mode, always follow this sequence:
+
+```bash
+# 1. Check if bridge is already running
+actionbook extension status
+
+# 2. If not running, start the bridge (keep running in a separate terminal)
+actionbook extension serve
+
+# 3. Wait a few seconds for auto-pairing via Native Messaging, then verify
+actionbook extension ping
+```
+
+The extension auto-pairs via Chrome Native Messaging — no manual token paste needed
+(requires `actionbook extension install` to have been run once to register the native host).
+
 ### Deep-Dive Documentation
 
 For detailed patterns and best practices:
@@ -233,3 +350,4 @@ For detailed patterns and best practices:
 |-----------|-------------|
 | [references/command-reference.md](references/command-reference.md) | Complete command reference with all features |
 | [references/authentication.md](references/authentication.md) | Login flows, OAuth, 2FA handling, state reuse |
+| [references/extension-troubleshooting.md](references/extension-troubleshooting.md) | Extension bridge troubleshooting guide |

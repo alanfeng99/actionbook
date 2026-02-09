@@ -67,6 +67,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Use extension mode (route browser commands through Chrome Extension bridge)
+    #[arg(long, env = "ACTIONBOOK_EXTENSION", global = true)]
+    pub extension: bool,
+
+    /// Extension bridge port
+    #[arg(long, env = "ACTIONBOOK_EXTENSION_PORT", global = true, default_value = "19222")]
+    pub extension_port: u16,
+
     /// Enable verbose output
     #[arg(short, long, global = true)]
     pub verbose: bool,
@@ -127,6 +135,12 @@ pub enum Commands {
     Profile {
         #[command(subcommand)]
         command: ProfileCommands,
+    },
+
+    /// Extension bridge management (for controlling user's browser via Chrome Extension)
+    Extension {
+        #[command(subcommand)]
+        command: ExtensionCommands,
     },
 
     /// Initial setup wizard
@@ -358,8 +372,55 @@ pub enum CookiesCommands {
         /// Cookie name
         name: String,
     },
-    /// Clear all cookies
-    Clear,
+    /// Clear all cookies for the current page (or specified domain)
+    Clear {
+        /// Explicit domain to clear (e.g., "example.com")
+        #[arg(long)]
+        domain: Option<String>,
+        /// Preview which cookies would be cleared without deleting
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip confirmation — required to actually clear
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ExtensionCommands {
+    /// Start the extension bridge WebSocket server
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "19222")]
+        port: u16,
+    },
+
+    /// Check if the bridge server is running
+    Status {
+        /// Bridge server port
+        #[arg(long, default_value = "19222")]
+        port: u16,
+    },
+
+    /// Ping the extension through the bridge
+    Ping {
+        /// Bridge server port
+        #[arg(long, default_value = "19222")]
+        port: u16,
+    },
+
+    /// Install the embedded Chrome extension to config directory
+    Install {
+        /// Force reinstall even if already installed at same version
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Print the extension install directory path
+    Path,
+
+    /// Remove the installed extension
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -435,6 +496,7 @@ impl Cli {
     pub async fn run(&self) -> Result<()> {
         match &self.command {
             Commands::Browser { command } => commands::browser::run(self, command).await,
+            Commands::Extension { command } => commands::extension::run(self, command).await,
             Commands::Search {
                 query,
                 domain,

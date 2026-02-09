@@ -8,6 +8,10 @@ repository = "https://github.com/anthropics/actionbook"
 keywords = ["browser", "automation", "cdp", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
+[lib]
+name = "actionbook"
+path = "src/lib.rs"
+
 [[bin]]
 name = "actionbook"
 path = "src/main.rs"
@@ -17,7 +21,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive", "env"] }
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
 
 # CDP client
 chromiumoxide = { version = "0.8", features = ["tokio-runtime"], default-features = false }
@@ -46,6 +50,13 @@ indicatif = "0.17"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Crypto / random
+rand = "0.8"
+subtle = "2"
+
+# Versioning
+semver = "1"
 
 # Utils
 dirs = "6"
