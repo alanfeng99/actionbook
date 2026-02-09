@@ -80,6 +80,8 @@ Based on the topic, generate 5-8 search queries from different angles:
 
 ### Step 2: Search the Web
 
+**For general topics**, use Google/Bing:
+
 ```bash
 # Search via Google
 actionbook browser open "https://www.google.com/search?q=<encoded_query>"
@@ -91,6 +93,81 @@ actionbook browser text "#b_results"
 ```
 
 Parse the search results to extract URLs and snippets. Collect the top 5-10 most relevant URLs.
+
+**For academic papers**, prefer arXiv Advanced Search (see Step 2b below).
+
+### Step 2b: arXiv Advanced Search (Actionbook Advantage)
+
+> **Key differentiator:** WebFetch/WebSearch can only do simple keyword searches. Actionbook has indexed the **entire arXiv Advanced Search form** with 40+ verified selectors, enabling multi-field, multi-criteria academic searches — just like a human researcher would use the form.
+
+Actionbook knows every interactive element on the arXiv advanced search page (`arxiv.org:/search/advanced:default`). This lets the Agent:
+
+| Capability | Actionbook Selector | WebFetch/WebSearch |
+|------------|--------------------|--------------------|
+| Search by specific field (Title, Author, Abstract) | `#terms-0-field` select → choose field | Not possible |
+| Add multiple search terms with boolean logic | `button "Add another term +"` | Not possible |
+| Filter by subject (CS, Physics, Math, etc.) | `#classification-computer_science` checkbox | Not possible |
+| Filter by date range | `#date-filter_by-3` radio + `#date-from_date` / `#date-to_date` | Not possible |
+| Filter by specific year | `#date-filter_by-2` radio + `#date-year` input | Not possible |
+| Include/exclude cross-listed papers | `#classification-include_cross_list-0/1` radio | Not possible |
+| Control results display | `#size` select, `#abstracts-0/1` radio | Not possible |
+
+**Example: Search for recent CS papers by a specific author:**
+
+```bash
+# Open arXiv Advanced Search
+actionbook browser open "https://arxiv.org/search/advanced"
+
+# 1. Set search field to "Author" and type author name
+actionbook browser click "#terms-0-field"
+actionbook browser click "option[value='author']"
+actionbook browser type "#terms-0-term" "Yann LeCun"
+
+# 2. Filter to Computer Science only
+actionbook browser click "#classification-computer_science"
+
+# 3. Restrict to past 12 months
+actionbook browser click "#date-filter_by-1"
+
+# 4. Show abstracts in results
+actionbook browser click "#abstracts-0"
+
+# 5. Submit search
+actionbook browser click "button:has-text('Search'):nth(2)"
+
+# 6. Extract results
+actionbook browser text "#main-container"
+```
+
+**Example: Search by title keywords in a date range:**
+
+```bash
+actionbook browser open "https://arxiv.org/search/advanced"
+
+# Search in "Title" field
+actionbook browser click "#terms-0-field"
+actionbook browser click "option[value='title']"
+actionbook browser type "#terms-0-term" "large language model agent"
+
+# Date range: 2025-01 to 2026-02
+actionbook browser click "#date-filter_by-3"
+actionbook browser type "#date-from_date" "2025-01-01"
+actionbook browser type "#date-to_date" "2026-02-09"
+
+# Submit and extract
+actionbook browser click "button:has-text('Search'):nth(2)"
+actionbook browser text "#main-container"
+```
+
+**When to use arXiv Advanced Search vs. Google:**
+
+| Scenario | Use |
+|----------|-----|
+| Know author name, need their recent papers | arXiv Advanced Search |
+| Need papers in a specific subject + date range | arXiv Advanced Search |
+| General topic exploration, multiple source types | Google Search |
+| Looking for blog posts, news, non-academic sources | Google Search |
+| Need both academic and non-academic sources | Google first, then arXiv Advanced Search |
 
 ### Step 3: Query Actionbook API for Known Site Selectors
 
@@ -110,7 +187,7 @@ actionbook get "<domain>:/<path>:<area>"
 |------|---------|---------------|
 | ar5iv paper | `ar5iv.labs.arxiv.org:/html/{paper_id}:default` | `h1.ltx_title_document` (title), `div.ltx_authors` (authors), `div.ltx_abstract` (abstract), `section.ltx_section` (sections) |
 | Google Scholar | `scholar.google.com:/:default` | `#gs_hdr_tsi` (search input), `#gs_hdr_tsb` (search button) |
-| arXiv search | `arxiv.org:/search/advanced:default` | Advanced search form with multi-criteria filters |
+| arXiv search | `arxiv.org:/search/advanced:default` | **40+ selectors**: field select, term input, category checkboxes (CS/Physics/Math/...), date range filters, cross-list control — see Step 2b |
 | arXiv homepage | `arxiv.org:/:default` | Global search across 2.4M+ articles |
 
 **For any other URL**, run `actionbook search "<keywords>" -d "<domain>"` to check if it's indexed. Use indexed selectors when available; fall back to `actionbook browser snapshot` for unindexed sites.
