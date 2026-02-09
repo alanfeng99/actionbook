@@ -51,6 +51,7 @@ async fn extension_eval(cli: &Cli, expression: &str) -> Result<serde_json::Value
         serde_json::json!({
             "expression": expression,
             "returnByValue": true,
+            "awaitPromise": true,
         }),
     )
     .await?;
@@ -78,6 +79,18 @@ async fn extension_eval(cli: &Cli, expression: &str) -> Result<serde_json::Value
                 .cloned()
                 .unwrap_or(serde_json::Value::Null)
         }))
+}
+
+/// Escape a string for safe embedding in a JS single-quoted string literal.
+/// Uses serde_json for comprehensive Unicode escaping, then converts to single-quote context.
+fn escape_js_string(s: &str) -> String {
+    // serde_json::to_string produces a valid JSON double-quoted string with all
+    // special chars escaped (\n, \t, \", \\, \uXXXX, etc.)
+    let json = serde_json::to_string(s).unwrap_or_else(|_| format!("\"{}\"", s));
+    // Strip the surrounding double quotes
+    let inner = &json[1..json.len() - 1];
+    // In single-quote JS context: unescape \" (not needed) and escape '
+    inner.replace("\\\"", "\"").replace('\'', "\\'")
 }
 
 /// JavaScript helper that resolves a selector (CSS or [ref=eN] format) and returns the element.
@@ -130,7 +143,7 @@ fn js_resolve_selector(selector: &str) -> String {
     }}
     return document.querySelector(selector);
 }})('{}')"#,
-        selector.replace('\\', "\\\\").replace('\'', "\\'")
+        escape_js_string(selector)
     )
 }
 
@@ -947,7 +960,7 @@ async fn type_text(
 ) -> Result<()> {
     if cli.extension {
         let resolve_js = js_resolve_selector(selector);
-        let escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_text = escape_js_string(text);
 
         if wait_ms > 0 {
             let poll_js = format!(
@@ -1047,7 +1060,7 @@ async fn type_text(
 async fn fill(cli: &Cli, config: &Config, selector: &str, text: &str, wait_ms: u64) -> Result<()> {
     if cli.extension {
         let resolve_js = js_resolve_selector(selector);
-        let escaped_text = text.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_text = escape_js_string(text);
 
         if wait_ms > 0 {
             let poll_js = format!(
@@ -1151,7 +1164,7 @@ async fn fill(cli: &Cli, config: &Config, selector: &str, text: &str, wait_ms: u
 async fn select(cli: &Cli, config: &Config, selector: &str, value: &str) -> Result<()> {
     if cli.extension {
         let resolve_js = js_resolve_selector(selector);
-        let escaped_value = value.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_value = escape_js_string(value);
         let select_js = format!(
             r#"(function() {{
                 var el = {};
@@ -1330,7 +1343,7 @@ async fn focus(cli: &Cli, config: &Config, selector: &str) -> Result<()> {
 
 async fn press(cli: &Cli, config: &Config, key: &str) -> Result<()> {
     if cli.extension {
-        let escaped_key = key.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_key = escape_js_string(key);
         let press_js = format!(
             r#"(function() {{
                 var key = '{}';
@@ -2502,13 +2515,16 @@ async fn cookies_extension(cli: &Cli, command: &Option<CookiesCommands>) -> Resu
         .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
         .unwrap_or_default();
 
-    /// Build a URL for cookie operations: prefer current_url, fall back to domain.
+    /// Build a URL for cookie operations: explicit domain takes priority, fall back to current_url.
     fn resolve_cookie_url(current_url: &str, domain: Option<&str>) -> std::result::Result<String, ActionbookError> {
+        // Domain first: user explicitly asked for this domain
+        if let Some(d) = domain {
+            let clean = d.trim_start_matches('.');
+            return Ok(format!("https://{}/", clean));
+        }
+        // Fallback to current page URL
         if !current_url.is_empty() {
             return Ok(current_url.to_string());
-        }
-        if let Some(d) = domain {
-            return Ok(format!("https://{}/", d));
         }
         Err(ActionbookError::ExtensionError(
             "Cannot perform cookie operation: no valid page URL (navigate to an http(s) page first)".to_string(),

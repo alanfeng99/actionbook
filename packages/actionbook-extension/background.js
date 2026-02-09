@@ -1,7 +1,7 @@
 // Actionbook Browser Bridge - Background Service Worker
 // Connects to the CLI bridge server via WebSocket and executes browser commands
 
-const BRIDGE_URL = "ws://localhost:19222";
+const DEFAULT_BRIDGE_PORT = 19222;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 const MAX_RETRIES = 8;
@@ -128,6 +128,15 @@ async function getStoredToken() {
   });
 }
 
+async function getEffectiveBridgeUrl() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("bridgePort", (result) => {
+      const port = result.bridgePort || DEFAULT_BRIDGE_PORT;
+      resolve(`ws://localhost:${port}`);
+    });
+  });
+}
+
 async function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
   if (connectionState === "connecting") return;
@@ -145,7 +154,8 @@ async function connect() {
   broadcastState();
 
   try {
-    ws = new WebSocket(BRIDGE_URL);
+    const bridgeUrl = await getEffectiveBridgeUrl();
+    ws = new WebSocket(bridgeUrl);
   } catch (err) {
     connectionState = "disconnected";
     logStateTransition("disconnected", "WebSocket constructor error");
@@ -204,6 +214,33 @@ async function connect() {
       stopNativePolling();
       logStateTransition("connected");
       broadcastState();
+      return;
+    }
+
+    // Handle token_expired from server (token rotated due to inactivity)
+    if (msg.type === "token_expired") {
+      chrome.storage.local.remove("bridgeToken", () => {
+        connectionState = "pairing_required";
+        logStateTransition("pairing_required", "token expired by server");
+        broadcastState();
+        startNativePolling();
+      });
+      if (ws) { ws.close(); ws = null; }
+      return;
+    }
+
+    // Handle hello_error from server (version mismatch, etc.)
+    if (msg.type === "hello_error") {
+      debugLog("[actionbook] Server rejected handshake:", msg.message);
+      handshakeCompleted = false;
+      if (handshakeTimer) {
+        clearTimeout(handshakeTimer);
+        handshakeTimer = null;
+      }
+      connectionState = "failed";
+      logStateTransition("failed", msg.message || "handshake rejected by server");
+      broadcastState();
+      if (ws) { ws.close(); ws = null; }
       return;
     }
 
@@ -737,6 +774,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (connectionState === "idle" || connectionState === "disconnected" || connectionState === "failed" || connectionState === "pairing_required") {
       retryCount = 0;
       reconnectDelay = RECONNECT_BASE_MS;
+      nativeMessagingAvailable = true;
+      nativeMessagingFailCount = 0;
+      if (nativeRecheckTimer) { clearTimeout(nativeRecheckTimer); nativeRecheckTimer = null; }
       // Try native messaging first, then start polling if needed
       tryNativeMessagingConnect();
       startNativePolling();
@@ -747,6 +787,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // User-initiated retry (reset retry count and reconnect)
     retryCount = 0;
     reconnectDelay = RECONNECT_BASE_MS;
+    nativeMessagingAvailable = true;
+    nativeMessagingFailCount = 0;
+    if (nativeRecheckTimer) { clearTimeout(nativeRecheckTimer); nativeRecheckTimer = null; }
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -813,6 +856,9 @@ const NATIVE_HOST_NAME = "com.actionbook.bridge";
 const NATIVE_POLL_INTERVAL_MS = 5000;
 let nativePollTimer = null;
 let nativeMessagingAvailable = true; // assume available until proven otherwise
+let nativeMessagingFailCount = 0;
+const NATIVE_MESSAGING_MAX_FAILS = 5;
+let nativeRecheckTimer = null;
 
 /**
  * Attempt to read the bridge session token from the CLI via Chrome Native Messaging.
@@ -842,9 +888,13 @@ async function tryNativeMessagingConnect() {
           const errMsg = chrome.runtime.lastError.message || "";
           // "Specified native messaging host not found" means host not installed
           if (errMsg.includes("not found") || errMsg.includes("not registered")) {
-            debugLog("[actionbook] Native messaging host not installed, disabling polling");
-            nativeMessagingAvailable = false;
-            stopNativePolling();
+            nativeMessagingFailCount++;
+            debugLog(`[actionbook] Native messaging unavailable (attempt ${nativeMessagingFailCount}/${NATIVE_MESSAGING_MAX_FAILS})`);
+            if (nativeMessagingFailCount >= NATIVE_MESSAGING_MAX_FAILS) {
+              nativeMessagingAvailable = false;
+              stopNativePolling();
+              scheduleNativeRecheck();
+            }
           } else {
             debugLog("[actionbook] Native messaging error:", errMsg);
           }
@@ -857,7 +907,11 @@ async function tryNativeMessagingConnect() {
             debugLog("[actionbook] Rejected invalid token from native host");
             return;
           }
-          chrome.storage.local.set({ bridgeToken: response.token }, () => {
+          const storageData = { bridgeToken: response.token };
+          if (response.port) {
+            storageData.bridgePort = response.port;
+          }
+          chrome.storage.local.set(storageData, () => {
             retryCount = 0;
             reconnectDelay = RECONNECT_BASE_MS;
             stopNativePolling();
@@ -872,6 +926,20 @@ async function tryNativeMessagingConnect() {
   } catch (err) {
     debugLog("[actionbook] Native messaging error:", err);
   }
+}
+
+/**
+ * Schedule a periodic recheck of native messaging availability.
+ * After too many failures, we pause polling but recheck every 60s.
+ */
+function scheduleNativeRecheck() {
+  if (nativeRecheckTimer) return;
+  nativeRecheckTimer = setTimeout(() => {
+    nativeRecheckTimer = null;
+    nativeMessagingAvailable = true;
+    nativeMessagingFailCount = 0;
+    startNativePolling();
+  }, 60000);
 }
 
 /**

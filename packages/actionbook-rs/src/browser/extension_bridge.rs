@@ -131,6 +131,38 @@ pub async fn delete_token_file() {
     }
 }
 
+/// Path to the bridge port file: `~/.local/share/actionbook/bridge-port`
+pub fn port_file_path() -> Result<PathBuf> {
+    let data_dir = dirs::data_local_dir().ok_or_else(|| {
+        ActionbookError::Other("Cannot determine local data directory".to_string())
+    })?;
+    Ok(data_dir.join("actionbook").join("bridge-port"))
+}
+
+/// Write the bridge port to disk so native messaging and other tools can discover it.
+pub async fn write_port_file(port: u16) -> Result<()> {
+    let path = port_file_path()?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(&path, port.to_string()).await?;
+    Ok(())
+}
+
+/// Read the bridge port from file. Returns None if file doesn't exist or is invalid.
+pub async fn read_port_file() -> Option<u16> {
+    let path = port_file_path().ok()?;
+    let content = tokio::fs::read_to_string(&path).await.ok()?;
+    content.trim().parse().ok()
+}
+
+/// Delete the port file if it exists.
+pub async fn delete_port_file() {
+    if let Ok(path) = port_file_path() {
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}
+
 /// Read the token from the token file. Returns None if file doesn't exist.
 pub async fn read_token_file() -> Option<String> {
     let path = token_file_path().ok()?;
@@ -170,6 +202,9 @@ impl BridgeState {
 /// Start the bridge WebSocket server on the given port with the given session token.
 /// This function blocks until the server is shut down.
 pub async fn serve(port: u16, token: String) -> Result<()> {
+    // Clean up any stale files from a previous ungraceful shutdown before starting
+    delete_port_file().await;
+
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(&addr).await.map_err(|e| {
         ActionbookError::Other(format!("Failed to bind to {}: {}", addr, e))
@@ -180,6 +215,15 @@ pub async fn serve(port: u16, token: String) -> Result<()> {
     println!("Bridge server listening on ws://127.0.0.1:{}", port);
     println!("Waiting for extension connection...");
 
+    // Write port file so native messaging can discover the actual port
+    if let Err(e) = write_port_file(port).await {
+        tracing::warn!("Failed to write port file: {}. Native messaging auto-pairing may not work.", e);
+        eprintln!(
+            "  Warning: Failed to write port file: {}. Auto-pairing may not work.",
+            e
+        );
+    }
+
     // Spawn TTL watchdog
     let ttl_state = Arc::clone(&state);
     let ttl_handle = tokio::spawn(async move {
@@ -189,8 +233,13 @@ pub async fn serve(port: u16, token: String) -> Result<()> {
             if s.last_activity.elapsed().as_secs() >= TOKEN_TTL_SECS {
                 tracing::warn!("Token idle timeout reached ({}min). Generating new token.", TOKEN_TTL_SECS / 60);
                 let new_token = generate_token();
-                // Close extension connection by dropping the sender
+                // Send token_expired notification before closing
                 if let Some(ext_tx) = s.extension_tx.take() {
+                    let expire_msg = serde_json::json!({
+                        "type": "token_expired",
+                        "message": "Session token expired due to inactivity"
+                    });
+                    let _ = ext_tx.send(expire_msg.to_string());
                     drop(ext_tx);
                 }
                 // Notify all pending CLI requests with their original IDs
@@ -214,7 +263,25 @@ pub async fn serve(port: u16, token: String) -> Result<()> {
         }
     });
 
-    let result = async {
+    // Handle SIGINT/SIGTERM for graceful shutdown with file cleanup
+    let shutdown = async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigint = signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
+            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
+            tokio::select! {
+                _ = sigint.recv() => tracing::info!("Received SIGINT"),
+                _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await.ok();
+        }
+    };
+
+    let accept_loop = async {
         loop {
             let (stream, peer) = listener.accept().await.map_err(|e| {
                 ActionbookError::Other(format!("Accept failed: {}", e))
@@ -234,33 +301,79 @@ pub async fn serve(port: u16, token: String) -> Result<()> {
             let state = Arc::clone(&state);
             tokio::spawn(handle_connection(stream, state));
         }
-    }
-    .await;
+    };
 
+    let result: Result<()> = tokio::select! {
+        r = accept_loop => r,
+        _ = shutdown => {
+            tracing::info!("Shutting down bridge server...");
+            Ok(())
+        }
+    };
+
+    // Cleanup always runs, whether shutdown was graceful or the loop exited
+    delete_port_file().await;
     ttl_handle.abort();
     result
+}
+
+/// Parse an origin string into (scheme, host, optional_port).
+fn parse_origin(origin: &str) -> Option<(&str, &str, Option<&str>)> {
+    let (scheme, rest) = origin.split_once("://")?;
+    if rest.is_empty() {
+        return None;
+    }
+    // Handle IPv6 bracket notation e.g. [::1]:8080
+    if rest.starts_with('[') {
+        let end_bracket = rest.find(']')?;
+        let host = &rest[..end_bracket + 1];
+        let after = &rest[end_bracket + 1..];
+        if after.is_empty() || after == "/" {
+            Some((scheme, host, None))
+        } else if let Some(port_part) = after.strip_prefix(':') {
+            let port_str = port_part.trim_end_matches('/');
+            Some((scheme, host, Some(port_str)))
+        } else {
+            None
+        }
+    } else {
+        let (host, port) = match rest.find(':') {
+            Some(i) => {
+                let port_str = rest[i + 1..].trim_end_matches('/');
+                (&rest[..i], Some(port_str))
+            }
+            None => {
+                let host = rest.trim_end_matches('/');
+                (host, None)
+            }
+        };
+        if host.is_empty() {
+            None
+        } else {
+            Some((scheme, host, port))
+        }
+    }
 }
 
 /// Validate the Origin header from a WebSocket upgrade request.
 /// Returns true if the origin is acceptable (loopback or chrome-extension://).
 fn is_origin_allowed(origin: Option<&str>) -> bool {
     match origin {
-        None => true, // No origin header is fine (CLI connections, curl, etc.)
+        None => true,
         Some(o) => {
             let lower = o.to_lowercase();
-            // Allow chrome-extension:// origins
-            if lower.starts_with("chrome-extension://") {
-                return true;
+            match parse_origin(&lower) {
+                None => false,
+                Some((scheme, host, _port)) => {
+                    if scheme == "chrome-extension" {
+                        return true;
+                    }
+                    if scheme == "http" {
+                        return matches!(host, "127.0.0.1" | "localhost" | "[::1]");
+                    }
+                    false
+                }
             }
-            // Allow loopback HTTP origins (for local dev tools)
-            if lower.starts_with("http://127.0.0.1")
-                || lower.starts_with("http://localhost")
-                || lower.starts_with("http://[::1]")
-            {
-                return true;
-            }
-            // Reject all others (http://, https://, etc.)
-            false
         }
     }
 }
@@ -333,10 +446,39 @@ async fn handle_connection(stream: TcpStream, state: Arc<Mutex<BridgeState>>) {
 
     let client_token = parsed.get("token").and_then(|t| t.as_str()).unwrap_or("");
     let client_role = parsed.get("role").and_then(|r| r.as_str()).unwrap_or("");
-    let _client_version = parsed
+    let client_version = parsed
         .get("version")
         .and_then(|v| v.as_str())
         .unwrap_or("0.0.0");
+
+    // Validate protocol version (require >= 0.2.0)
+    let min_version = semver::Version::parse("0.2.0").unwrap();
+    match semver::Version::parse(client_version) {
+        Ok(v) if v >= min_version => {
+            // Version OK
+        }
+        _ => {
+            tracing::warn!(
+                "Rejected {} client with version {} (minimum: {})",
+                client_role,
+                client_version,
+                PROTOCOL_VERSION
+            );
+            let err_msg = serde_json::json!({
+                "type": "hello_error",
+                "error": "version_mismatch",
+                "message": format!(
+                    "Protocol version {} is not supported. Minimum required: {}",
+                    client_version, PROTOCOL_VERSION
+                ),
+                "required_version": PROTOCOL_VERSION,
+            });
+            let _ = write
+                .send(Message::Text(err_msg.to_string().into()))
+                .await;
+            return;
+        }
+    }
 
     // Validate token (constant-time to prevent timing side-channels)
     {
@@ -402,7 +544,15 @@ async fn handle_extension_client(
                 break;
             }
         }
-        // Cleanup happens in the main read loop below
+        // Send close frame so the extension receives a clean disconnect
+        let _ = write
+            .send(Message::Close(Some(
+                tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                    code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Normal,
+                    reason: "Session ended".into(),
+                },
+            )))
+            .await;
     });
 
     // Read responses from extension and route to pending CLI requests
@@ -575,7 +725,17 @@ async fn handle_cli_client(
         });
 
         if let Some(ext_tx) = &s.extension_tx {
-            let _ = ext_tx.send(cmd.to_string());
+            if ext_tx.send(cmd.to_string()).is_err() {
+                s.pending.remove(&request_id);
+                s.extension_tx = None;
+                drop(s);
+                let err = serde_json::json!({
+                    "id": cli_id,
+                    "error": { "code": -32000, "message": "Extension disconnected" }
+                });
+                let _ = write.send(Message::Text(err.to_string().into())).await;
+                return;
+            }
         }
     }
 
@@ -745,4 +905,74 @@ pub async fn is_bridge_running(port: u16) -> bool {
     tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
         .await
         .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_origin_allowed() {
+        // No origin is fine
+        assert!(is_origin_allowed(None));
+
+        // Allowed loopback origins
+        assert!(is_origin_allowed(Some("http://127.0.0.1")));
+        assert!(is_origin_allowed(Some("http://127.0.0.1:8080")));
+        assert!(is_origin_allowed(Some("http://127.0.0.1/")));
+        assert!(is_origin_allowed(Some("http://localhost")));
+        assert!(is_origin_allowed(Some("http://localhost:3000")));
+        assert!(is_origin_allowed(Some("http://localhost/")));
+        assert!(is_origin_allowed(Some("http://[::1]")));
+        assert!(is_origin_allowed(Some("http://[::1]:8080")));
+        assert!(is_origin_allowed(Some("http://[::1]/")));
+
+        // Chrome extension origins
+        assert!(is_origin_allowed(Some("chrome-extension://abcdefghijklmnop")));
+        assert!(is_origin_allowed(Some("chrome-extension://dpfioflkmnkklgjldmaggkodhlidkdcd")));
+
+        // Case insensitive
+        assert!(is_origin_allowed(Some("HTTP://LOCALHOST")));
+        assert!(is_origin_allowed(Some("Chrome-Extension://abc")));
+    }
+
+    #[test]
+    fn test_origin_rejected() {
+        // Prefix-matching bypass attempts
+        assert!(!is_origin_allowed(Some("http://127.0.0.1.evil.com")));
+        assert!(!is_origin_allowed(Some("http://localhost.evil.com")));
+
+        // HTTPS not allowed (only http for loopback)
+        assert!(!is_origin_allowed(Some("https://127.0.0.1")));
+        assert!(!is_origin_allowed(Some("https://localhost")));
+
+        // External origins
+        assert!(!is_origin_allowed(Some("http://evil.com")));
+        assert!(!is_origin_allowed(Some("https://evil.com")));
+        assert!(!is_origin_allowed(Some("http://example.com")));
+
+        // Malformed origins
+        assert!(!is_origin_allowed(Some("not-a-url")));
+        assert!(!is_origin_allowed(Some("")));
+        assert!(!is_origin_allowed(Some("http://")));
+    }
+
+    #[test]
+    fn test_parse_origin() {
+        assert_eq!(parse_origin("http://127.0.0.1"), Some(("http", "127.0.0.1", None)));
+        assert_eq!(parse_origin("http://127.0.0.1:8080"), Some(("http", "127.0.0.1", Some("8080"))));
+        assert_eq!(parse_origin("http://localhost/"), Some(("http", "localhost", None)));
+        assert_eq!(parse_origin("http://[::1]"), Some(("http", "[::1]", None)));
+        assert_eq!(parse_origin("http://[::1]:8080"), Some(("http", "[::1]", Some("8080"))));
+        assert_eq!(parse_origin("chrome-extension://abcdef"), Some(("chrome-extension", "abcdef", None)));
+        assert_eq!(parse_origin("http://"), None);
+        assert_eq!(parse_origin("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_token_format() {
+        let token = generate_token();
+        assert!(token.starts_with(TOKEN_PREFIX));
+        assert_eq!(token.len(), 4 + 32); // "abk_" + 32 hex chars
+    }
 }

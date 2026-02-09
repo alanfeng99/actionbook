@@ -18,6 +18,11 @@ pub async fn run(cli: &Cli, command: &ExtensionCommands) -> Result<()> {
 }
 
 async fn serve(_cli: &Cli, port: u16) -> Result<()> {
+    // Clean up stale files from previous ungraceful shutdowns to prevent
+    // native messaging from returning outdated port/token to the extension.
+    extension_bridge::delete_port_file().await;
+    extension_bridge::delete_token_file().await;
+
     let extension_path = if embedded_extension::is_installed() {
         let dir = embedded_extension::extension_dir()?;
         let path_str = dir.display().to_string();
