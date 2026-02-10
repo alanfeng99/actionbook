@@ -112,7 +112,7 @@ For comprehensive guides, API references, and tutorials, visit our documentation
 
 ## Stay tuned
 
-Star Actionbook on Github to support and get latest information.
+We move fast. Star Actionbook on Github to support and get latest information.
 
 ![Star Actionbook](https://github.com/user-attachments/assets/2d6571cb-4e12-438b-b7bf-9a4b68ef2be3)
 
