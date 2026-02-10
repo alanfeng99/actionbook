@@ -393,6 +393,9 @@ pub enum ExtensionCommands {
         /// Port to listen on
         #[arg(long, default_value = "19222")]
         port: u16,
+        /// Use an isolated Chrome profile for the extension bridge
+        #[arg(long)]
+        isolated: bool,
     },
 
     /// Check if the bridge server is running
@@ -414,6 +417,13 @@ pub enum ExtensionCommands {
         /// Force reinstall even if already installed at same version
         #[arg(long)]
         force: bool,
+    },
+
+    /// Stop the running bridge server
+    Stop {
+        /// Bridge server port
+        #[arg(long, default_value = "19222")]
+        port: u16,
     },
 
     /// Print the extension install directory path

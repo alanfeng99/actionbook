@@ -91,7 +91,7 @@ actionbook --extension browser text
 
 # Step 8: Cleanup (CRITICAL — see Extension Mode Lifecycle below)
 actionbook --extension browser close    # release debug connection FIRST
-# then stop bridge server
+actionbook extension stop               # then stop bridge server
 ```
 
 ## Action Manual Format
@@ -137,6 +137,7 @@ Commands for managing the Chrome Extension bridge:
 actionbook extension install              # Install extension files to local config dir
 actionbook extension path                 # Show extension directory (for Chrome "Load unpacked")
 actionbook extension serve                # Start WebSocket bridge (keep running in background)
+actionbook extension stop                 # Stop the running bridge server (sends SIGTERM)
 actionbook extension status               # Check bridge and extension connection status
 actionbook extension ping                 # Ping the extension to verify link is alive
 ```
@@ -388,7 +389,7 @@ actionbook --extension browser open "https://example.com"
 actionbook --extension browser close
 
 # Step 2: Stop the bridge server
-# (stop the background process running 'actionbook extension serve')
+actionbook extension stop
 
 # Step 3: Verify Chrome no longer shows "debugging" banner
 actionbook extension status    # should show "not running"
